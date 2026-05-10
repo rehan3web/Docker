@@ -355,8 +355,6 @@ router.get('/traefik-snippet', authenticateToken, async (req, res) => {
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=${email}"
@@ -374,6 +372,8 @@ router.get('/traefik-snippet', authenticateToken, async (req, res) => {
 networks:
   proxy:
     external: true`;
+    // NOTE: No global HTTP→HTTPS redirect here — that blocks Let's Encrypt HTTP-01 challenges.
+    // Per-domain redirects are handled inside each traefik-configs/*.yml dynamic file.
     res.json({ snippet, email });
 });
 

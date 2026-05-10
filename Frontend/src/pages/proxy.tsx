@@ -383,18 +383,33 @@ export default function ProxyPage() {
                   {/* SSL active info */}
                   {selected.ssl_enabled && (
                     <Card className="bg-background border-border shadow-none rounded-xl">
-                      <CardContent className="p-6 flex items-start gap-4">
-                        <div className="p-2 bg-primary/10 rounded-full">
-                          <ShieldCheck className="w-5 h-5 text-primary" />
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-primary/10 rounded-full shrink-0">
+                            <ShieldCheck className="w-4 h-4 text-primary" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-foreground mb-1">SSL Active</p>
+                            <a href={`https://${selected.domain}`} target="_blank" rel="noreferrer" className="text-xs font-mono text-primary hover:underline">
+                              https://{selected.domain}
+                            </a>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Proxying to <span className="font-mono">127.0.0.1:{selected.target_port}</span>. Traefik provisions the cert on first HTTPS request.
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium text-foreground mb-1">SSL Active</p>
-                          <a href={`https://${selected.domain}`} target="_blank" rel="noreferrer" className="text-xs font-mono text-primary hover:underline">
-                            https://{selected.domain}
-                          </a>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            Proxying to <span className="font-mono">127.0.0.1:{selected.target_port}</span>. Certificate managed automatically by Traefik's ACME integration.
-                          </p>
+                        {/* Cert not yet issued troubleshooting */}
+                        <div className="border border-amber-500/20 bg-amber-500/5 rounded-lg p-3 space-y-2">
+                          <p className="text-xs font-medium text-amber-600 dark:text-amber-400">If you see a certificate warning in your browser:</p>
+                          <ol className="text-[11px] text-muted-foreground space-y-1.5 list-decimal list-inside leading-relaxed">
+                            <li>Make sure <span className="font-mono bg-muted px-1 rounded">port 80</span> is open on your VPS firewall — Let's Encrypt needs it for the HTTP-01 challenge.</li>
+                            <li>Create <span className="font-mono bg-muted px-1 rounded">acme.json</span> with correct permissions (once, before starting Traefik):
+                              <pre className="mt-1 ml-4 bg-muted rounded p-1.5 text-[10px] font-mono overflow-x-auto">mkdir -p letsencrypt{"\n"}touch letsencrypt/acme.json{"\n"}chmod 600 letsencrypt/acme.json</pre>
+                            </li>
+                            <li>Do <span className="font-bold">not</span> add a global HTTP→HTTPS redirect on Traefik's <span className="font-mono bg-muted px-1 rounded">web</span> entrypoint — it blocks the ACME challenge. Docklet's per-domain configs handle the redirect already.</li>
+                            <li>Restart Traefik: <span className="font-mono bg-muted px-1 rounded text-[10px]">docker compose restart traefik</span></li>
+                            <li>Visit <span className="font-mono bg-muted px-1 rounded text-[10px]">https://{selected.domain}</span> — Traefik will request the cert from Let's Encrypt automatically.</li>
+                          </ol>
                         </div>
                       </CardContent>
                     </Card>
@@ -439,6 +454,7 @@ function TraefikSetupCard() {
     container_name: docklet-traefik
     restart: unless-stopped
     command:
+      - "--api.insecure=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.file.directory=/traefik-configs"
@@ -457,6 +473,10 @@ function TraefikSetupCard() {
       - "./letsencrypt:/letsencrypt"
       - "./traefik-configs:/traefik-configs:ro"`;
 
+  const preCmd = `mkdir -p letsencrypt
+touch letsencrypt/acme.json
+chmod 600 letsencrypt/acme.json`;
+
   return (
     <Card className="bg-background border-border shadow-none rounded-xl">
       <CardHeader className="p-4 pb-3 border-b border-border/50">
@@ -474,11 +494,29 @@ function TraefikSetupCard() {
         </CardDescription>
       </CardHeader>
       {open && (
-        <CardContent className="p-4 space-y-3">
-          <p className="text-xs text-muted-foreground">Add this service to your <code className="font-mono bg-muted px-1 rounded text-[10px]">docker-compose.yml</code>:</p>
-          <pre className="bg-muted rounded-lg p-3 text-[10px] font-mono overflow-x-auto whitespace-pre leading-relaxed">{snippet}</pre>
-          <p className="text-xs text-muted-foreground">
-            The <code className="font-mono bg-muted px-1 rounded text-[10px]">traefik-configs/</code> directory is automatically managed by Docklet — config files are written and removed as you add or delete proxy rules.
+        <CardContent className="p-4 space-y-4">
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground">Step 1 — Create <code className="font-mono bg-muted px-1 rounded text-[10px]">acme.json</code> before starting Traefik</p>
+            <p className="text-[11px] text-muted-foreground">Run once on your VPS in the same directory as your compose file:</p>
+            <pre className="bg-muted rounded-lg p-3 text-[10px] font-mono overflow-x-auto whitespace-pre leading-relaxed">{preCmd}</pre>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground">Step 2 — Add Traefik to your <code className="font-mono bg-muted px-1 rounded text-[10px]">docker-compose.yml</code></p>
+            <p className="text-[11px] text-muted-foreground">
+              Do <strong>not</strong> add a global HTTP→HTTPS redirect on the <code className="font-mono bg-muted px-0.5 rounded">web</code> entrypoint — it blocks the Let's Encrypt HTTP-01 challenge.
+              Docklet's per-domain configs handle the redirect automatically.
+            </p>
+            <pre className="bg-muted rounded-lg p-3 text-[10px] font-mono overflow-x-auto whitespace-pre leading-relaxed">{snippet}</pre>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground">Step 3 — Open ports on your VPS firewall</p>
+            <pre className="bg-muted rounded-lg p-2 text-[10px] font-mono overflow-x-auto whitespace-pre leading-relaxed">{`ufw allow 80\nufw allow 443`}</pre>
+            <p className="text-[11px] text-muted-foreground">
+              Port 80 must be reachable by Let's Encrypt for the HTTP-01 challenge. Port 443 serves HTTPS traffic.
+            </p>
+          </div>
+          <p className="text-[11px] text-muted-foreground border-t border-border/50 pt-3">
+            The <code className="font-mono bg-muted px-1 rounded text-[10px]">traefik-configs/</code> directory is auto-managed by Docklet — configs are written and removed as you add or delete proxy rules. Traefik hot-reloads them with no restart needed.
           </p>
         </CardContent>
       )}
