@@ -1,0 +1,34 @@
+postgres.yml                                                                |  2 +
+ 2 files changed, 74 insertions(+)
+ create mode 100644 attached_assets/Pasted-Updating-62f21f7-c6045a3-Fast-forward-Backend-src-route_1778433114960.txt
+root@root:~/Docker# docker compose -f postgres.yml up -d docklet-traefik
+
+[+] up 5/5
+ ✔ Container docklet-db           Healthy                                                                          1.0s
+ ✔ Container docklet-pooler       Running                                                                          0.0s
+ ✔ Container docklet-server       Running                                                                          0.0s
+ ✔ Container docklet-traefik      Started                                                                          1.7s
+ ✔ Container docklet-traefik-init Exited                                                                           1.0s
+root@root:~/Docker# docker logs docklet-traefik 2>&1 | grep -iE "acme|error|certificate|challenge|level=error"
+2026-05-10T17:14:37Z INF Starting provider *acme.ChallengeTLSALPN
+2026-05-10T17:14:37Z INF Starting provider *acme.Provider
+2026-05-10T17:14:37Z INF Testing certificate renew... acmeCA=https://acme-v02.api.letsencrypt.org/directory providerName=letsencrypt.acme
+2026-05-10T17:14:37Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:37Z ERR Provider error, retrying in 275.419165ms error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:37Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:37Z ERR Provider error, retrying in 734.341402ms error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:38Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:38Z ERR Provider error, retrying in 659.899346ms error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:38Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:38Z ERR Provider error, retrying in 1.338105932s error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:40Z INF Register... providerName=letsencrypt.acme
+2026-05-10T17:14:40Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:40Z ERR Provider error, retrying in 2.608746705s error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:40Z ERR Unable to obtain ACME certificate for domains error="cannot get ACME client acme: error: 400 :: POST :: https://acme-v02.api.letsencrypt.org/acme/new-acct :: urn:ietf:params:acme:error:invalidContact :: Error validating contact(s) :: contact email has forbidden domain \"example.com\"" ACME CA=https://acme-v02.api.letsencrypt.org/directory acmeCA=https://acme-v02.api.letsencrypt.org/directory domains=["app.xrpflow.xyz"] providerName=letsencrypt.acme routerName=app-xrpflow-xyz-https@file rule=Host(`app.xrpflow.xyz`)
+2026-05-10T17:14:42Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:42Z ERR Provider error, retrying in 2.725994582s error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:45Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:45Z ERR Provider error, retrying in 8.432894099s error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:53Z ERR Failed to retrieve information of the docker client and server host error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+2026-05-10T17:14:53Z ERR Provider error, retrying in 11.00879093s error="Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.40, please upgrade your client to a newer version" providerName=docker
+root@root:~/Docker# 
