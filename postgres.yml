@@ -79,12 +79,17 @@ services:
       pgbouncer:
         condition: service_started
     environment:
-      # ── PostgreSQL connection — connects to the pooler for best performance ──────
+      # ── PostgreSQL connection — app queries go through PgBouncer pooler ─────────
       PGHOST:     pgbouncer
       PGPORT:     5432
       PGUSER:     ${DB_USERNAME}
       PGPASSWORD: ${DB_PASSWORD}
       PGDATABASE: ${DB_NAME}
+      # ── Direct PostgreSQL — bypasses PgBouncer for DDL / infra DB creation ─────
+      # PgBouncer only knows the primary DB; CREATE DATABASE and connecting to
+      # dockelt_data must go directly to the postgres service on port 5432.
+      POSTGRES_DIRECT_HOST: postgres
+      POSTGRES_DIRECT_PORT: 5432
       # ── Docklet admin credentials ────────────────────────────────
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}

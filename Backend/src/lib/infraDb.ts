@@ -18,7 +18,51 @@ async function ensureInfraDbExists(): Promise<void> {
         ) {
             throw err;
         }
+        // Database already exists — that's fine
     }
+}
+
+/**
+ * Build a Pool that connects DIRECTLY to PostgreSQL (not PgBouncer).
+ *
+ * PgBouncer only knows the primary application database.  Any connection to
+ * a different database (dockelt_data, template1, postgres …) must bypass it
+ * and talk to the PostgreSQL server on POSTGRES_DIRECT_HOST:POSTGRES_DIRECT_PORT.
+ *
+ * In the Docker Compose deployment those vars are set to the "postgres" service
+ * name.  In Replit / plain-env deployments there is no PgBouncer, so we fall
+ * back to PGHOST/PGPORT which point straight to PostgreSQL anyway.
+ */
+function buildDirectPool(database: string): Pool {
+    const directHost = process.env.POSTGRES_DIRECT_HOST || process.env.PGHOST || process.env.DB_HOST || 'localhost';
+    const directPort = parseInt(process.env.POSTGRES_DIRECT_PORT || process.env.PGPORT || process.env.DB_PORT || '5432', 10);
+
+    if (process.env.DATABASE_URL) {
+        // In DATABASE_URL environments (Replit managed PG) there is no PgBouncer,
+        // so we can safely reuse the URL after swapping the database name.
+        // If POSTGRES_DIRECT_HOST is explicitly set we also swap the host so
+        // that DDL goes around any intermediate proxy.
+        const url = new URL(process.env.DATABASE_URL);
+        url.pathname = `/${database}`;
+        if (process.env.POSTGRES_DIRECT_HOST) {
+            url.hostname = process.env.POSTGRES_DIRECT_HOST;
+            url.port = String(directPort);
+        }
+        return new Pool({
+            connectionString: url.toString(),
+            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+            application_name: 'docklet-infra',
+        });
+    }
+
+    return new Pool({
+        user:     process.env.PGUSER     || process.env.DB_USER  || 'postgres',
+        host:     directHost,
+        database,
+        password: process.env.PGPASSWORD || process.env.PASSWORD || 'postgres',
+        port:     directPort,
+        application_name: 'docklet-infra',
+    });
 }
 
 export async function getInfraConnection(): Promise<Pool> {
@@ -26,25 +70,7 @@ export async function getInfraConnection(): Promise<Pool> {
 
     await ensureInfraDbExists();
 
-    if (process.env.DATABASE_URL) {
-        const url = new URL(process.env.DATABASE_URL);
-        url.pathname = `/${INFRA_DB}`;
-        infraPool = new Pool({
-            connectionString: url.toString(),
-            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-            application_name: 'docklet-infra',
-        });
-    } else {
-        infraPool = new Pool({
-            user:     process.env.PGUSER     || process.env.DB_USER  || 'postgres',
-            host:     process.env.PGHOST     || process.env.DB_HOST  || 'localhost',
-            database: INFRA_DB,
-            password: process.env.PGPASSWORD || process.env.PASSWORD || 'postgres',
-            port:     parseInt(process.env.PGPORT || process.env.DB_PORT || '5432', 10),
-            application_name: 'docklet-infra',
-        });
-    }
-
+    infraPool = buildDirectPool(INFRA_DB);
     return infraPool;
 }
 

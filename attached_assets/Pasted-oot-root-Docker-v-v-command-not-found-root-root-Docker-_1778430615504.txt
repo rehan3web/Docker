@@ -1,0 +1,64 @@
+oot@root:~/Docker# v
+v: command not found
+root@root:~/Docker# docker logs -f docklet-server
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+Backend running on port 3001
+[InfraDB] Created database "dockelt_data"
+[InfraDB] Connected to dockelt_data
+[InfraDB] Query Error: {
+  query: '\n' +
+    '            CREATE TABLE IF NOT EXISTS scheduled_tasks (\n' +
+    '                id SERIAL PRIMARY KEY,\n' +
+    '                name TEXT NOT NULL,\n' +
+    '                cron_expr TEXT NOT NULL,\n' +
+    '                timezone TEXT,\n' +
+    '                script TEXT NOT NULL,\n' +
+    '                enabled BOOLEAN NOT NULL DEFAULT TRUE,\n' +
+    '                created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,\n' +
+    '                updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000\n' +
+    '            )\n' +
+    '        ',
+  params: [],
+  errorMessage: 'no such database: dockelt_data',
+  detail: undefined
+}
+[Scheduler] Init error: no such database: dockelt_data
+[InfraDB] Query Error: {
+  query: '\n' +
+    '        CREATE TABLE IF NOT EXISTS container_env_vars (\n' +
+    '            id SERIAL PRIMARY KEY,\n' +
+    '            container_name TEXT NOT NULL,\n' +
+    '            key TEXT NOT NULL,\n' +
+    '            encrypted_value TEXT NOT NULL,\n' +
+    '            created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())*1000,\n' +
+    '            UNIQUE(container_name, key)\n' +
+    '        )',
+  params: [],
+  errorMessage: 'no such database: dockelt_data',
+  detail: undefined
+}
+[ContainerMgmt] Init failed: no such database: dockelt_data
+[InfraDB] Query Error: {
+  query: '\n' +
+    '        CREATE TABLE IF NOT EXISTS storage_config (\n' +
+    '            id INTEGER PRIMARY KEY DEFAULT 1,\n' +
+    '            endpoint TEXT NOT NULL,\n' +
+    '            port INTEGER NOT NULL DEFAULT 9000,\n' +
+    '            access_key TEXT NOT NULL,\n' +
+    '            secret_key TEXT NOT NULL,\n' +
+    "            region TEXT NOT NULL DEFAULT 'us-east-1',\n" +
+    '            use_ssl BOOLEAN NOT NULL DEFAULT FALSE,\n' +
+    '            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n' +
+    '        )\n' +
+    '    ',
+  params: [],
+  errorMessage: 'no such database: dockelt_data',
+  detail: undefined
+}
+{
+  message: 'no such database: dockelt_data',
+  detail: undefined,
+  position: undefined,
+  duration: 57
+}

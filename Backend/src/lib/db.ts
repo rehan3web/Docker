@@ -51,13 +51,20 @@ export async function executeSysQuery(query: string, params: any[] = []) {
     // template1 is guaranteed to exist in every PostgreSQL installation
     const sysDbCandidates = ['template1', 'postgres'];
 
+    // For system queries (CREATE DATABASE etc.) we must bypass PgBouncer and
+    // connect directly to PostgreSQL.  POSTGRES_DIRECT_HOST is set in the
+    // Docker Compose deployment to the "postgres" service name; in plain-env
+    // or Replit deployments it is absent and PGHOST already points to PG.
+    const directHost = process.env.POSTGRES_DIRECT_HOST || process.env.PGHOST || process.env.DB_HOST || 'localhost';
+    const directPort = parseInt(process.env.POSTGRES_DIRECT_PORT || process.env.PGPORT || process.env.DB_PORT || '5432', 10);
+
     const baseConfig = process.env.DATABASE_URL
         ? null
         : {
             user: process.env.PGUSER || process.env.DB_USER || 'postgres',
-            host: process.env.PGHOST || process.env.DB_HOST || 'localhost',
+            host: directHost,
             password: process.env.PGPASSWORD || process.env.PASSWORD || 'postgres',
-            port: parseInt(process.env.PGPORT || process.env.DB_PORT || '5432', 10),
+            port: directPort,
             application_name: 'docklet',
             max: 1,
         };
