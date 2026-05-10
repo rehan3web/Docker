@@ -123,10 +123,30 @@ services:
     depends_on:
       - docklet-server
 
+  # ── One-shot init: create acme.json with correct permissions ──────────────
+  # Runs before Traefik starts. chmod 600 is required by Traefik — it refuses
+  # to write certs if the file is world-readable.
+  traefik-init:
+    container_name: docklet-traefik-init
+    image: alpine:3.19
+    restart: "no"
+    volumes:
+      - ./letsencrypt:/letsencrypt
+      - ./traefik-configs:/traefik-configs
+    command: >
+      sh -c "
+        mkdir -p /letsencrypt /traefik-configs &&
+        touch /letsencrypt/acme.json &&
+        chmod 600 /letsencrypt/acme.json &&
+        echo '[traefik-init] acme.json ready (chmod 600)'
+      "
+
   # ── Traefik HTTP/HTTPS reverse proxy ───────────────────────────────────────
   # Handles container domain routing via Docker labels, and serves dynamic
   # file-provider configs from traefik-configs/ for the Reverse Proxy Manager.
   # Let's Encrypt SSL via built-in ACME — no certbot required.
+  # IMPORTANT: No global HTTP→HTTPS redirect here — it blocks the Let's Encrypt
+  # HTTP-01 challenge. Per-domain redirects live in traefik-configs/*.yml files.
   docklet-traefik:
     container_name: docklet-traefik
     image: traefik:v3.3
@@ -138,8 +158,6 @@ services:
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}"
@@ -155,7 +173,10 @@ services:
       - default
       - apps
     depends_on:
-      - docklet-server
+      traefik-init:
+        condition: service_completed_successfully
+      docklet-server:
+        condition: service_started
 
 volumes:
   pgdata:
