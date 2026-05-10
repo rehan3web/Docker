@@ -1,0 +1,24 @@
+tcp:
+  routers:
+    postgres-router:
+      entryPoints:
+        - postgres
+      rule: "HostSNI(`*`)"
+      service: postgres-svc
+
+    pgbouncer-router:
+      entryPoints:
+        - pgbouncer
+      rule: "HostSNI(`*`)"
+      service: pgbouncer-svc
+
+  services:
+    postgres-svc:
+      loadBalancer:
+        servers:
+          - address: "docklet-db:5432"
+
+    pgbouncer-svc:
+      loadBalancer:
+        servers:
+          - address: "docklet-pooler:5432"

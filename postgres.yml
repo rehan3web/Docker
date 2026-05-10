@@ -1,0 +1,160 @@
+name: docklet
+
+# ══════════════════════════════════════════════════════════════════
+#  All credentials are read from .env in the same directory.
+#  Copy .env.example → .env and fill in your values, then run:
+#  docker compose -f postgres.yml up -d --build
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  postgres:
+    container_name: docklet-db
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB:       ${DB_NAME}
+    ports:
+      - "127.0.0.1:15432:5432"   # local-only; Traefik TCP proxy serves public :5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    container_name: docklet-pooler
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:16543:5432"   # local-only; Traefik TCP proxy serves public :6543
+    environment:
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_USER:     ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME:     ${DB_NAME}
+      POOL_MODE:   transaction
+      MAX_CLIENT_CONN:   1000
+      DEFAULT_POOL_SIZE: 10
+      AUTH_TYPE:   scram-sha-256
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
+
+  # ── Traefik TCP proxy — started by "Expose Public" button ──────────────────
+  # Built from Proxy/Dockerfile which bakes traefik.yml + traefik-dynamic.yml.
+  # Exposes PostgreSQL on :5432 and PgBouncer on :6543 publicly via TCP routing.
+  docklet-proxy:
+    container_name: docklet-proxy
+    build:
+      context: ./Proxy
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:5432:5432"   # direct postgres (public)
+      - "0.0.0.0:6543:6543"   # pgbouncer pooler (public)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    profiles:
+      - expose
+
+  docklet-server:
+    container_name: docklet-server
+    build:
+      context: ./Backend
+    restart: unless-stopped
+    pid: host
+    privileged: true
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    environment:
+      # ── PostgreSQL connection — connects to the pooler for best performance ──────
+      PGHOST:     pgbouncer
+      PGPORT:     5432
+      PGUSER:     ${DB_USERNAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_NAME}
+      # ── Docklet admin credentials ────────────────────────────────
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      JWT_SECRET:     ${JWT_SECRET}
+      PORT: 3001
+      # ── Reverse Proxy ────────────────────────────────────────────
+      SELF_CONTAINER_NAME: docklet-server
+    volumes:
+      # Docker socket — required for pg_dump via docker exec
+      - /var/run/docker.sock:/var/run/docker.sock
+      # postgres.yml config — mounted for reference
+      - ./postgres.yml:/config/postgres.yml
+      # .env file — mounted so backend can read variable names if needed
+      - ./.env:/config/.env
+      # Proxy directory — mounted so the backend can build the proxy image
+      - ./Proxy:/config/Proxy
+      # Persistent backups directory
+      - ./backups:/usr/src/app/backups
+      # Reverse Proxy — Traefik dynamic configs (written by backend, read by Traefik)
+      - ./traefik-configs:/usr/src/app/traefik-configs
+      # Reverse Proxy — Let's Encrypt certs (written by Traefik ACME)
+      - ./letsencrypt:/usr/src/app/letsencrypt
+
+  docklet-client:
+    container_name: docklet-client
+    build:
+      context: ./Frontend
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:3000:80"
+    depends_on:
+      - docklet-server
+
+  # ── Traefik HTTP/HTTPS reverse proxy ───────────────────────────────────────
+  # Handles container domain routing via Docker labels, and serves dynamic
+  # file-provider configs from traefik-configs/ for the Reverse Proxy Manager.
+  # Let's Encrypt SSL via built-in ACME — no certbot required.
+  docklet-traefik:
+    container_name: docklet-traefik
+    image: traefik:v3.3
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/traefik-configs"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+      - ./traefik-configs:/traefik-configs:ro
+    networks:
+      - default
+      - apps
+    depends_on:
+      - docklet-server
+
+volumes:
+  pgdata:
+
+networks:
+  apps:
+    name: docklet-apps

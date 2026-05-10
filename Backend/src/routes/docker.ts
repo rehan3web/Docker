@@ -1,0 +1,618 @@
+import express from 'express';
+import Docker from 'dockerode';
+import fs from 'fs';
+import { spawn, execSync } from 'child_process';
+import { Socket } from 'socket.io';
+import { authenticateToken } from '../middleware/auth';
+
+const router = express.Router();
+
+let docker: Docker | null = null;
+let dockerError: string | null = null;
+
+function getDocker(): Docker {
+    if (docker) return docker;
+    try {
+        docker = new Docker({ socketPath: '/var/run/docker.sock' });
+        return docker;
+    } catch (err: any) {
+        dockerError = err.message;
+        throw err;
+    }
+}
+
+function dockerAvailable(): { ok: boolean; reason?: string } {
+    try {
+        if (!fs.existsSync('/var/run/docker.sock')) {
+            return { ok: false, reason: 'Docker socket /var/run/docker.sock not found. Docker is not installed or not running on this host.' };
+        }
+        return { ok: true };
+    } catch (err: any) {
+        return { ok: false, reason: err.message };
+    }
+}
+
+router.get('/status', authenticateToken, async (_req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.json({ available: false, reason: avail.reason });
+    try {
+        const info = await getDocker().info();
+        res.json({
+            available: true,
+            containers: info.Containers,
+            running: info.ContainersRunning,
+            stopped: info.ContainersStopped,
+            paused: info.ContainersPaused,
+            images: info.Images,
+            serverVersion: info.ServerVersion,
+            os: info.OperatingSystem,
+        });
+    } catch (err: any) {
+        res.json({ available: false, reason: err.message });
+    }
+});
+
+router.get('/containers', authenticateToken, async (_req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ available: false, reason: avail.reason, containers: [] });
+    try {
+        const list = await getDocker().listContainers({ all: true });
+        const containers = list.map(c => ({
+            id: c.Id,
+            shortId: c.Id.slice(0, 12),
+            names: c.Names.map(n => n.replace(/^\//, '')),
+            image: c.Image,
+            command: c.Command,
+            createdAt: c.Created * 1000,
+            state: c.State,
+            status: c.Status,
+            ports: (c.Ports || []).map(p => ({
+                privatePort: p.PrivatePort,
+                publicPort: p.PublicPort,
+                hostIp: (p as any).IP || '',
+                type: p.Type,
+            })),
+        }));
+        res.json({ available: true, containers });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message || 'Failed to list containers' });
+    }
+});
+
+async function containerAction(id: string | string[], action: 'start' | 'stop' | 'restart' | 'remove') {
+    const c = getDocker().getContainer(String(id));
+    if (action === 'start') return c.start();
+    if (action === 'stop') return c.stop();
+    if (action === 'restart') return c.restart();
+    if (action === 'remove') return c.remove({ force: true });
+}
+
+router.post('/containers/:id/start', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        await containerAction(req.params.id, 'start');
+        res.json({ ok: true });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.post('/containers/:id/stop', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        await containerAction(req.params.id, 'stop');
+        res.json({ ok: true });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.post('/containers/:id/restart', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        await containerAction(req.params.id, 'restart');
+        res.json({ ok: true });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.delete('/containers/:id', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        await containerAction(req.params.id, 'remove');
+        res.json({ ok: true });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Container logs ────────────────────────────────────────────────────────────
+router.get('/containers/:id/logs', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        const tail = parseInt(String(req.query.tail || '300'), 10);
+        const container = getDocker().getContainer(String(req.params.id));
+        const buf: Buffer[] = [];
+        const stream = await container.logs({
+            stdout: true, stderr: true, timestamps: true,
+            tail: isNaN(tail) ? 300 : tail,
+        });
+        // dockerode returns a Buffer directly when not multiplexed; handle both
+        if (Buffer.isBuffer(stream)) {
+            res.json({ logs: stream.toString('utf8') });
+        } else {
+            (stream as any).on('data', (chunk: Buffer) => buf.push(chunk));
+            (stream as any).on('end', () => {
+                const raw = Buffer.concat(buf).toString('utf8');
+                // Strip 8-byte dockerode multiplexing header from each line
+                const lines = raw.split('\n').map(l => l.length > 8 ? l.slice(8) : l).join('\n');
+                res.json({ logs: lines });
+            });
+            (stream as any).on('error', (err: any) => res.status(500).json({ message: err.message }));
+        }
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Container stats (CPU %, RAM, Uptime) ─────────────────────────────────────
+// Use callback form of container.stats() — more reliable across dockerode versions
+// than the promise form which can return a raw stream on some Docker builds.
+function getContainerStatsOnce(container: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Stats timed out')), 6000);
+        try {
+            container.stats({ stream: false }, (err: any, data: any) => {
+                clearTimeout(timer);
+                if (err) { reject(err); return; }
+                // data may be a raw stream (older dockerode) — read first chunk
+                if (data && typeof data.pipe === 'function') {
+                    let raw = '';
+                    data.on('data', (chunk: Buffer) => { raw += chunk.toString(); data.destroy(); });
+                    data.once('close', () => {
+                        try { resolve(JSON.parse(raw)); } catch { reject(new Error('Could not parse stats stream')); }
+                    });
+                    data.on('error', reject);
+                } else {
+                    resolve(data);
+                }
+            });
+        } catch (e) { clearTimeout(timer); reject(e); }
+    });
+}
+
+router.get('/containers/:id/stats', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        const container = getDocker().getContainer(String(req.params.id));
+
+        // Inspect first — skip stats if container isn't running
+        const info = await container.inspect();
+        if (!info.State?.Running) {
+            return res.json({ cpuPercent: 0, memUsage: 0, memLimit: 0, memPercent: 0, uptimeMs: 0, netRx: 0, netTx: 0 });
+        }
+
+        const statsRaw = await getContainerStatsOnce(container);
+
+        // CPU %
+        const cpuDelta = (statsRaw.cpu_stats?.cpu_usage?.total_usage ?? 0) -
+                         (statsRaw.precpu_stats?.cpu_usage?.total_usage ?? 0);
+        const sysDelta = (statsRaw.cpu_stats?.system_cpu_usage ?? 0) -
+                         (statsRaw.precpu_stats?.system_cpu_usage ?? 0);
+        const numCpus = statsRaw.cpu_stats?.online_cpus ?? statsRaw.cpu_stats?.cpu_usage?.percpu_usage?.length ?? 1;
+        const cpuPercent = sysDelta > 0 ? (cpuDelta / sysDelta) * numCpus * 100 : 0;
+
+        // Memory (exclude page cache)
+        const cache = statsRaw.memory_stats?.stats?.cache ?? 0;
+        const memUsage = Math.max(0, (statsRaw.memory_stats?.usage ?? 0) - cache);
+        const memLimit = statsRaw.memory_stats?.limit ?? 0;
+
+        // Uptime
+        const startedAt = info.State?.StartedAt ? new Date(info.State.StartedAt) : null;
+        const uptimeMs = startedAt ? Date.now() - startedAt.getTime() : 0;
+
+        // Network I/O
+        let netRx = 0, netTx = 0;
+        for (const iface of Object.values(statsRaw.networks ?? {})) {
+            netRx += (iface as any).rx_bytes ?? 0;
+            netTx += (iface as any).tx_bytes ?? 0;
+        }
+
+        res.json({
+            cpuPercent: Math.min(Math.max(cpuPercent, 0), 100),
+            memUsage, memLimit,
+            memPercent: memLimit > 0 ? (memUsage / memLimit) * 100 : 0,
+            uptimeMs, netRx, netTx,
+        });
+    } catch (err: any) {
+        // Return zeros rather than 500 — the frontend treats non-200 as errors
+        // and backs off, but returning zeros keeps the UI clean
+        console.error(`[stats] ${req.params.id.slice(0, 12)} —`, err.message);
+        res.json({ cpuPercent: 0, memUsage: 0, memLimit: 0, memPercent: 0, uptimeMs: 0, netRx: 0, netTx: 0, error: err.message });
+    }
+});
+
+// ── Container inspect (network + mounts) ─────────────────────────────────────
+router.get('/containers/:id/inspect', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        const container = getDocker().getContainer(String(req.params.id));
+        const info = await container.inspect();
+        res.json({
+            networks: info.NetworkSettings?.Networks ?? {},
+            mounts: info.Mounts ?? [],
+            hostname: (info.Config as any)?.Hostname ?? null,
+        });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.post('/bulk/:action', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    const action = req.params.action as 'start' | 'stop' | 'restart' | 'remove';
+    if (!['start', 'stop', 'restart', 'remove'].includes(action)) {
+        return res.status(400).json({ message: 'Invalid bulk action' });
+    }
+    try {
+        const list = await getDocker().listContainers({ all: true });
+        const results: { id: string; ok: boolean; error?: string }[] = [];
+        for (const c of list) {
+            try {
+                if (action === 'start' && c.State === 'running') { results.push({ id: c.Id, ok: true }); continue; }
+                if (action === 'stop' && c.State !== 'running') { results.push({ id: c.Id, ok: true }); continue; }
+                await containerAction(c.Id, action);
+                results.push({ id: c.Id, ok: true });
+            } catch (err: any) {
+                results.push({ id: c.Id, ok: false, error: err.message });
+            }
+        }
+        res.json({ ok: true, results });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Pull + Run (SSE streaming) ────────────────────────────────────────────────
+router.post('/pull-run', authenticateToken, async (req, res) => {
+    const { image, name, ports, env, cmd, network } = req.body;
+    if (!image) return res.status(400).json({ message: 'image required' });
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+
+    try {
+        send({ log: `Pulling ${image}...\n` });
+        const d = getDocker();
+        await new Promise<void>((resolve, reject) => {
+            d.pull(image, (err: any, stream: any) => {
+                if (err) return reject(err);
+                d.modem.followProgress(stream, (err2: any) => {
+                    if (err2) return reject(err2);
+                    resolve();
+                }, (event: any) => {
+                    const msg = (event.status || '') + (event.progress ? ` ${event.progress}` : '');
+                    if (msg.trim()) send({ log: msg + '\n' });
+                });
+            });
+        });
+        send({ log: `\nImage ready. Creating container...\n` });
+
+        const portBindings: Record<string, any[]> = {};
+        const exposedPorts: Record<string, {}> = {};
+        if (Array.isArray(ports)) {
+            for (const p of ports) {
+                const parts = String(p).split(':');
+                let hostIp = '', hostPort = '', containerPort = '';
+                if (parts.length === 3) {
+                    [hostIp, hostPort, containerPort] = parts;
+                } else {
+                    hostPort = parts[0];
+                    containerPort = parts[1] || parts[0];
+                }
+                const binding: any = { HostPort: hostPort };
+                if (hostIp) binding.HostIp = hostIp;
+                portBindings[`${containerPort}/tcp`] = [binding];
+                exposedPorts[`${containerPort}/tcp`] = {};
+            }
+        }
+
+        const createOpts: any = {
+            Image: image,
+            Env: Array.isArray(env) ? env : [],
+            ExposedPorts: exposedPorts,
+            HostConfig: { PortBindings: portBindings, RestartPolicy: { Name: 'unless-stopped' } },
+        };
+        if (name) createOpts.name = name;
+        if (Array.isArray(cmd) && cmd.length) createOpts.Cmd = cmd;
+
+        const container = await d.createContainer(createOpts);
+        await container.start();
+        const info = await container.inspect();
+        const cname = (info.Name || '').replace('/', '');
+        send({ log: `\nContainer started: ${cname} (${info.Id.slice(0, 12)})\n` });
+
+        if (network) {
+            send({ log: `Connecting to network "${network}"...\n` });
+            try {
+                let net: any;
+                const nets = await d.listNetworks({ filters: { name: [network] } });
+                const exact = nets.find((n: any) => n.Name === network);
+                if (exact) {
+                    net = d.getNetwork(exact.Id);
+                } else {
+                    net = await d.createNetwork({ Name: network, Driver: 'bridge' });
+                    send({ log: `Network "${network}" created.\n` });
+                }
+                await net.connect({ Container: info.Id });
+                send({ log: `Connected to network "${network}".\n` });
+            } catch (netErr: any) {
+                send({ log: `Warning: network connect failed — ${netErr.message}\n` });
+            }
+        }
+
+        send({ done: true, ok: true, containerId: info.Id.slice(0, 12) });
+    } catch (err: any) {
+        send({ log: `\nError: ${err.message}\n` });
+        send({ done: true, ok: false, error: err.message });
+    }
+    res.end();
+});
+
+// ── Rebind port binding (public ↔ private) ────────────────────────────────────
+router.post('/rebind', authenticateToken, async (req, res) => {
+    const { id, public: makePublic } = req.body;
+    if (!id) return res.status(400).json({ message: 'id required' });
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+    const newIp = makePublic ? '0.0.0.0' : '127.0.0.1';
+
+    try {
+        const d = getDocker();
+        const c = d.getContainer(id);
+        const info = await c.inspect();
+        const name = (info.Name || '').replace(/^\//, '');
+        const image = info.Config.Image;
+        const env = info.Config.Env || [];
+        const cmd = info.Config.Cmd || [];
+        const oldBindings: Record<string, any[]> = (info.HostConfig as any).PortBindings || {};
+        const restartPolicy = (info.HostConfig as any).RestartPolicy || { Name: 'unless-stopped' };
+
+        const newPortBindings: Record<string, any[]> = {};
+        const exposedPorts: Record<string, {}> = {};
+        for (const [port, bindings] of Object.entries(oldBindings)) {
+            if (Array.isArray(bindings) && bindings.length > 0) {
+                newPortBindings[port] = bindings.map((b: any) => ({ HostPort: b.HostPort || '', HostIp: newIp }));
+            } else {
+                newPortBindings[port] = [{ HostIp: newIp, HostPort: '' }];
+            }
+            exposedPorts[port] = {};
+        }
+
+        // Save non-default networks so we can rejoin them after recreate
+        const extraNetworks = Object.keys((info.NetworkSettings as any).Networks || {})
+            .filter(n => n !== 'bridge' && n !== 'host' && n !== 'none');
+
+        send({ log: `Stopping ${name}...\n` });
+        try { await c.stop({ t: 5 }); } catch {}
+        send({ log: `Removing ${name}...\n` });
+        await c.remove();
+
+        send({ log: `Recreating with ${makePublic ? 'public (0.0.0.0)' : 'private (127.0.0.1)'} binding...\n` });
+        const createOpts: any = {
+            name,
+            Image: image,
+            Env: env,
+            ExposedPorts: exposedPorts,
+            HostConfig: { PortBindings: newPortBindings, RestartPolicy: restartPolicy },
+        };
+        if (cmd && cmd.length) createOpts.Cmd = cmd;
+
+        const newC = await d.createContainer(createOpts);
+        await newC.start();
+        const newInfo = await newC.inspect();
+
+        // Reconnect to all previous user-defined networks
+        for (const netName of extraNetworks) {
+            try {
+                const nets = await d.listNetworks({ filters: { name: [netName] } });
+                const exact = nets.find((n: any) => n.Name === netName);
+                if (exact) {
+                    const net = d.getNetwork(exact.Id);
+                    await net.connect({ Container: newInfo.Id });
+                    send({ log: `Reconnected to network "${netName}".\n` });
+                }
+            } catch (netErr: any) {
+                send({ log: `Warning: could not rejoin network "${netName}" — ${netErr.message}\n` });
+            }
+        }
+
+        send({ log: `\nDone — ${name} (${newInfo.Id.slice(0, 12)}) now ${makePublic ? 'public' : 'private'}.\n` });
+        send({ done: true, ok: true, containerId: newInfo.Id.slice(0, 12) });
+    } catch (err: any) {
+        send({ log: `\nError: ${err.message}\n` });
+        send({ done: true, ok: false, error: err.message });
+    }
+    res.end();
+});
+
+// ── Compose Up (SSE streaming) ────────────────────────────────────────────────
+router.post('/compose-up', authenticateToken, (req, res) => {
+    const { yaml } = req.body;
+    if (!yaml) return res.status(400).json({ message: 'yaml required' });
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+
+    const tmpDir = `/tmp/docklet-compose-${Date.now()}`;
+    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+    fs.writeFileSync(`${tmpDir}/docker-compose.yml`, yaml);
+
+    let cmd: string, args: string[];
+    try {
+        execSync('docker compose version', { stdio: 'pipe', timeout: 3000 });
+        cmd = 'docker';
+        args = ['compose', '-f', `${tmpDir}/docker-compose.yml`, 'up', '-d', '--force-recreate'];
+    } catch {
+        cmd = 'docker-compose';
+        args = ['-f', `${tmpDir}/docker-compose.yml`, 'up', '-d', '--force-recreate'];
+    }
+
+    send({ log: `$ ${cmd} ${args.join(' ')}\n\n` });
+    const proc = spawn(cmd, args);
+    proc.stdout.on('data', (d: Buffer) => send({ log: d.toString() }));
+    proc.stderr.on('data', (d: Buffer) => send({ log: d.toString() }));
+    proc.on('close', (code: number) => {
+        try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
+        send({ done: true, ok: code === 0, code });
+        res.end();
+    });
+    req.on('close', () => { try { proc.kill(); } catch {} });
+});
+
+export default router;
+
+// ── Docker container exec (terminal) socket handler ───────────────────────────
+interface ExecSession { stream: any }
+const execSessions = new Map<string, ExecSession>();
+
+export function registerDockerExecSocketHandlers(socket: Socket) {
+    const sid = socket.id;
+
+    function closeExec() {
+        const s = execSessions.get(sid);
+        if (s) {
+            try { s.stream.end(); } catch { /* ignore */ }
+            execSessions.delete(sid);
+        }
+    }
+
+    socket.on('docker:exec:start', async ({ containerId, rows, cols }: { containerId: string; rows?: number; cols?: number }) => {
+        closeExec();
+        if (!dockerAvailable().ok) {
+            socket.emit('docker:exec:error', { message: 'Docker is not available' });
+            return;
+        }
+        try {
+            const container = getDocker().getContainer(containerId);
+            // /bin/sh exists in every container (Alpine ash, Debian dash, etc.)
+            // bash is a bonus — try sh first so Alpine containers connect immediately
+            const shells = ['/bin/sh', '/bin/bash', 'bash', 'sh'];
+
+            type StreamResult = { stream: any; firstChunk: Buffer | null };
+
+            async function tryShell(shell: string): Promise<StreamResult | null> {
+                try {
+                    const exec = await container.exec({
+                        Cmd: [shell],
+                        AttachStdin: true,
+                        AttachStdout: true,
+                        AttachStderr: true,
+                        Tty: true,
+                        Env: ['TERM=xterm-256color'],
+                    });
+                    const stream = await exec.start({ hijack: true, stdin: true });
+
+                    // Race: first data chunk (shell started) vs immediate end (shell not found).
+                    // exec.start() does NOT throw when the binary is missing — Docker sends the
+                    // OCI error through the stream and then closes it.
+                    const firstChunk = await new Promise<Buffer | null>((resolve) => {
+                        let settled = false;
+                        const finish = (v: Buffer | null) => { if (!settled) { settled = true; resolve(v); } };
+                        stream.once('data', (chunk: Buffer) => finish(chunk));
+                        stream.once('end',  () => finish(null));
+                        stream.once('error', () => finish(null));
+                        // Safety timeout: if no event in 3 s, assume it started (rare slow hosts)
+                        setTimeout(() => finish(Buffer.alloc(0)), 3000);
+                    });
+
+                    if (firstChunk === null) {
+                        // Shell binary absent — stream ended immediately
+                        try { stream.destroy(); } catch { /* ignore */ }
+                        return null;
+                    }
+                    return { stream, firstChunk };
+                } catch {
+                    return null;
+                }
+            }
+
+            let result: StreamResult | null = null;
+            for (const shell of shells) {
+                result = await tryShell(shell);
+                if (result) break;
+            }
+
+            if (!result) {
+                socket.emit('docker:exec:error', { message: 'No shell found in container (/bin/sh, /bin/bash, bash, sh all failed)' });
+                return;
+            }
+
+            const { stream: execStream, firstChunk } = result;
+            execSessions.set(sid, { stream: execStream });
+            socket.emit('docker:exec:ready', {});
+
+            // Replay the first chunk we already consumed during shell detection
+            if (firstChunk && firstChunk.length > 0) {
+                socket.emit('docker:exec:data', firstChunk.toString('utf8'));
+            }
+
+            execStream.on('data', (chunk: Buffer) => {
+                socket.emit('docker:exec:data', chunk.toString('utf8'));
+            });
+            execStream.on('end', () => {
+                socket.emit('docker:exec:exit', {});
+                execSessions.delete(sid);
+            });
+            execStream.on('error', (err: any) => {
+                socket.emit('docker:exec:error', { message: err.message });
+                execSessions.delete(sid);
+            });
+        } catch (err: any) {
+            socket.emit('docker:exec:error', { message: err.message });
+        }
+    });
+
+    socket.on('docker:exec:input', (data: string) => {
+        const s = execSessions.get(sid);
+        if (s) {
+            try { s.stream.write(data); } catch { /* ignore */ }
+        }
+    });
+
+    socket.on('docker:exec:resize', ({ rows, cols }: { rows: number; cols: number }) => {
+        // Resize is handled by the exec's resize method if accessible
+    });
+
+    socket.on('docker:exec:stop', closeExec);
+
+    socket.on('disconnect', closeExec);
+}

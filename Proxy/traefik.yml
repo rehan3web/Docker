@@ -1,0 +1,13 @@
+entryPoints:
+  postgres:
+    address: ":5432"
+  pgbouncer:
+    address: ":6543"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+log:
+  level: INFO
