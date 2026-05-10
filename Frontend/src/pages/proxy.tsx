@@ -58,8 +58,12 @@ export default function ProxyPage() {
     if (!finalDomain || !targetPort.trim()) return;
     setCreating(true);
     try {
-      await createProxyDomain(finalDomain, Number(targetPort));
-      toast.success(`${finalDomain} proxy created`);
+      const result = await createProxyDomain(finalDomain, Number(targetPort));
+      if (result?.autoVerified) {
+        toast.success(`${finalDomain} — DNS auto-verified & SSL enabled via wildcard`);
+      } else {
+        toast.success(`${finalDomain} proxy created`);
+      }
       qc.invalidateQueries({ queryKey: ["proxy-domains"] });
       setDomain(""); setSubdomain(""); setBaseDomainId(""); setTargetPort(""); setShowCreate(false);
     } catch (err: any) {

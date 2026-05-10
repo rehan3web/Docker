@@ -4,6 +4,7 @@ import fs from 'fs';
 import dns from 'dns';
 import { authenticateToken } from '../middleware/auth';
 import { getInfraConnection } from '../lib/infraDb';
+import { getConnection } from '../lib/db';
 import { emitToUser } from '../lib/socket';
 
 const router = express.Router();
@@ -81,6 +82,26 @@ function domainRule(domain: string): string {
 
 function safeId(domain: string): string {
     return domain.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+// ── Parent-domain wildcard check ──────────────────────────────────────────────
+// If the subdomain's parent (e.g. xrpflow.xyz for app.xrpflow.xyz) is already
+// wildcard-verified in the primary DB, we can skip DNS verification entirely.
+
+async function isParentVerified(domain: string): Promise<boolean> {
+    const parts = domain.split('.');
+    if (parts.length < 3) return false; // root domain — must verify normally
+    const parent = parts.slice(1).join('.');
+    try {
+        const pool = await getConnection();
+        const { rows } = await pool.query(
+            'SELECT 1 FROM verified_domains WHERE domain = $1 AND verified = TRUE LIMIT 1',
+            [parent]
+        );
+        return rows.length > 0;
+    } catch {
+        return false;
+    }
 }
 
 // ── Traefik dynamic file-provider config templates ────────────────────────────
@@ -186,15 +207,26 @@ router.post('/create', authenticateToken, async (req, res) => {
     try {
         await ensureTable();
         const pool = await getInfraConnection();
+
+        // Auto-verify if the parent base domain is already wildcard-verified
+        const autoVerify = await isParentVerified(domain.toLowerCase());
+
         const { rows } = await pool.query(
-            `INSERT INTO docklet_proxy_domains (domain, target_port)
-             VALUES ($1, $2)
-             ON CONFLICT (domain) DO UPDATE SET target_port = $2, updated_at = NOW()
+            `INSERT INTO docklet_proxy_domains (domain, target_port, verified, ssl_enabled)
+             VALUES ($1, $2, $3, $3)
+             ON CONFLICT (domain) DO UPDATE
+               SET target_port = $2,
+                   verified    = GREATEST(docklet_proxy_domains.verified, $3),
+                   ssl_enabled = GREATEST(docklet_proxy_domains.ssl_enabled, $3),
+                   updated_at  = NOW()
              RETURNING *`,
-            [domain.toLowerCase(), port]
+            [domain.toLowerCase(), port, autoVerify]
         );
-        await writeConfig(domain.toLowerCase(), port, false);
-        res.json({ domain: rows[0] });
+
+        // Write HTTPS config immediately if auto-verified, otherwise HTTP-only
+        await writeConfig(domain.toLowerCase(), port, autoVerify);
+
+        res.json({ domain: rows[0], autoVerified: autoVerify });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }
@@ -265,15 +297,31 @@ router.post('/ssl/:id', authenticateToken, async (req, res) => {
 });
 
 // Re-sync all Traefik config files from DB (Traefik hot-reloads automatically).
+// Also retroactively auto-verifies any subdomain whose parent base domain is
+// already wildcard-verified — fixes entries created before this feature existed.
 router.post('/reload', authenticateToken, async (_req, res) => {
     try {
         await ensureTable();
         const pool = await getInfraConnection();
         const { rows } = await pool.query('SELECT * FROM docklet_proxy_domains');
+        let autoFixed = 0;
         for (const row of rows) {
-            await writeConfig(row.domain, row.target_port, row.ssl_enabled ?? false);
+            let ssl = row.ssl_enabled ?? false;
+            // Retroactively auto-verify pending subdomains of verified base domains
+            if (!row.verified) {
+                const parentOk = await isParentVerified(row.domain);
+                if (parentOk) {
+                    await pool.query(
+                        'UPDATE docklet_proxy_domains SET verified = TRUE, ssl_enabled = TRUE, updated_at = NOW() WHERE id = $1',
+                        [row.id]
+                    );
+                    ssl = true;
+                    autoFixed++;
+                }
+            }
+            await writeConfig(row.domain, row.target_port, ssl);
         }
-        res.json({ ok: true, rewritten: rows.length });
+        res.json({ ok: true, rewritten: rows.length, autoFixed });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }

@@ -637,7 +637,7 @@ export async function getServerIp(): Promise<{ ip: string }> {
   return apiFetch("/proxy/server-ip");
 }
 
-export async function createProxyDomain(domain: string, targetPort: number): Promise<{ domain: ProxyDomain }> {
+export async function createProxyDomain(domain: string, targetPort: number): Promise<{ domain: ProxyDomain; autoVerified?: boolean }> {
   return apiFetch("/proxy/create", {
     method: "POST",
     body: JSON.stringify({ domain, targetPort }),
