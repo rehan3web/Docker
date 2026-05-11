@@ -4,7 +4,7 @@ import {
     RotateCcw, AlertTriangle, Info, Terminal,
     BookOpen, History, Database, ChevronDown, ChevronRight,
     Play, Loader2, Copy, Check, Search, Tag, Package,
-    Trash2, X, Zap, Sun, Moon,
+    Trash2, X, Zap, Sun, Moon, Container, PlugZap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +63,123 @@ interface KnowledgeEntry {
     created_at: string;
 }
 
+// ── Container list parser & card ─────────────────────────────────────────────
+
+interface ParsedContainer {
+    name: string;
+    ports: string;
+    status: "running" | "exited";
+}
+
+function parseContainerBlock(text: string): ParsedContainer[] | null {
+    const lower = text.toLowerCase();
+    if (!lower.includes("container") || !lower.includes(" - ")) return null;
+
+    const result: ParsedContainer[] = [];
+
+    // Split into running / exited sections
+    const runningMatch = text.match(/running containers?:?([\s\S]*?)(?:exited containers?:|$)/i);
+    const exitedMatch  = text.match(/exited containers?:?([\s\S]*?)$/i);
+
+    const parseSection = (section: string, status: "running" | "exited") => {
+        // Each entry starts with " - " or "- "
+        const items = section.split(/\s*-\s+/).filter(s => s.trim().length > 0);
+        for (const item of items) {
+            const trimmed = item.trim();
+            if (!trimmed) continue;
+            // name (ports: xxx) or name (no ports)
+            const portMatch = trimmed.match(/^([^\s(]+)\s*\(ports?:\s*([^)]+)\)/i);
+            const noPort    = trimmed.match(/^([^\s(]+)\s*\(no ports?\)/i);
+            const bare      = trimmed.match(/^([^\s(]+)/);
+            if (portMatch) {
+                result.push({ name: portMatch[1], ports: portMatch[2].trim(), status });
+            } else if (noPort) {
+                result.push({ name: noPort[1], ports: "", status });
+            } else if (bare) {
+                result.push({ name: bare[1], ports: "", status });
+            }
+        }
+    };
+
+    if (runningMatch?.[1]) parseSection(runningMatch[1], "running");
+    if (exitedMatch?.[1])  parseSection(exitedMatch[1],  "exited");
+
+    return result.length > 0 ? result : null;
+}
+
+function ContainerListCard({ containers }: { containers: ParsedContainer[] }) {
+    const running = containers.filter(c => c.status === "running");
+    const exited  = containers.filter(c => c.status === "exited");
+
+    return (
+        <div className="my-2 rounded-lg border border-border overflow-hidden">
+            {/* Header */}
+            <div className="px-3 py-2 bg-muted/30 border-b border-border flex items-center gap-2">
+                <Container className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Containers</span>
+                <div className="ml-auto flex items-center gap-2">
+                    {running.length > 0 && (
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-500">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                            {running.length} running
+                        </span>
+                    )}
+                    {exited.length > 0 && (
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-red-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                            {exited.length} exited
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Running */}
+            {running.map((c, i) => (
+                <div
+                    key={`r-${i}`}
+                    className="flex items-center gap-3 px-3 py-2.5 border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors"
+                >
+                    <span className="relative flex h-2 w-2 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    </span>
+                    <span className="text-sm font-medium text-foreground flex-1 truncate font-mono">{c.name}</span>
+                    {c.ports ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                            <PlugZap className="w-3 h-3 text-muted-foreground" />
+                            <span className="text-xs font-mono text-muted-foreground">{c.ports}</span>
+                        </div>
+                    ) : (
+                        <span className="text-[10px] text-muted-foreground/60 shrink-0">no ports</span>
+                    )}
+                    <Badge className="text-[10px] px-1.5 py-0 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0">
+                        Running
+                    </Badge>
+                </div>
+            ))}
+
+            {/* Exited — with divider if both sections present */}
+            {exited.length > 0 && running.length > 0 && (
+                <div className="px-3 py-1 bg-muted/10 border-y border-border/50">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Exited</span>
+                </div>
+            )}
+            {exited.map((c, i) => (
+                <div
+                    key={`e-${i}`}
+                    className="flex items-center gap-3 px-3 py-2.5 border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors opacity-70"
+                >
+                    <span className="w-2 h-2 rounded-full bg-red-400/70 shrink-0" />
+                    <span className="text-sm font-medium text-foreground/70 flex-1 truncate font-mono">{c.name}</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full border-red-400/30 text-red-400 shrink-0">
+                        Exited
+                    </Badge>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 // ── Log line renderer (matches ai.tsx style) ──────────────────────────────────
 
 function LogLine({ entry }: { entry: LogEntry }) {
@@ -89,12 +206,15 @@ function LogLine({ entry }: { entry: LogEntry }) {
                     </div>
                 </div>
             );
-        case "output":
+        case "output": {
+            const containers = parseContainerBlock(entry.content);
+            if (containers) return <ContainerListCard containers={containers} />;
             return (
                 <div className="font-mono text-[11px] text-muted-foreground whitespace-pre-wrap leading-relaxed px-1">
                     {entry.content}
                 </div>
             );
+        }
         case "success":
             return (
                 <div className="flex items-center gap-2 text-primary py-0.5">
@@ -134,13 +254,16 @@ function LogLine({ entry }: { entry: LogEntry }) {
                     <span className="text-xs">{entry.content}</span>
                 </div>
             );
-        default:
+        default: {
+            const containers = parseContainerBlock(entry.content);
+            if (containers) return <ContainerListCard containers={containers} />;
             return (
                 <div className="flex items-center gap-2 text-muted-foreground py-0.5">
                     <Info className="w-3.5 h-3.5 shrink-0" />
                     <span className="text-xs">{entry.content}</span>
                 </div>
             );
+        }
     }
 }
 
