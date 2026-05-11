@@ -299,8 +299,12 @@ async function runBuild(id: string) {
             record.buildMethod = 'railpack';
             emitLog(id, 'system', '\nNo Dockerfile found → using RailPack auto-detect build\n');
 
+            // Ensure railpack binary + mise are ready (build-time only — not at startup)
+            emitLog(id, 'system', 'Ensuring railpack and mise are available...\n');
+            await ensureRailpack();
+
             if (!railpackInPath()) {
-                record.error = 'railpack not available — auto-install failed at startup';
+                record.error = 'railpack not available — install failed';
                 record.finishedAt = Date.now();
                 emitLog(id, 'stderr', `\n[${record.error}]\n`);
                 return emitStatus(id, 'failed', { error: record.error });
@@ -385,9 +389,6 @@ function updateQueuePositions() {
 }
 
 export async function initBuildQueue(): Promise<void> {
-    // Auto-install railpack if missing — runs once at startup
-    await ensureRailpack();
-
     if (redisReady()) {
         try {
             const connOpts = { host: 'docklet-redis', port: 6379 };
