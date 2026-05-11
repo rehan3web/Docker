@@ -47,6 +47,7 @@ interface ConfirmRequest {
     agentId: string;
     title: string;
     message: string;
+    showNewPortOption?: boolean;
 }
 
 interface InputFieldSpec {
@@ -800,11 +801,13 @@ function AgentInputModal({
 function AgentConfirmModal({
     request,
     onConfirm,
+    onNewPort,
     onCancel,
     loading,
 }: {
     request: ConfirmRequest;
     onConfirm: () => void;
+    onNewPort: () => void;
     onCancel: () => void;
     loading: boolean;
 }) {
@@ -831,24 +834,36 @@ function AgentConfirmModal({
                 </div>
 
                 {/* Actions */}
-                <div className="flex gap-2 px-5 pb-5">
-                    <Button
-                        variant="outline"
-                        className="flex-1 h-9 gap-2 border-border text-muted-foreground hover:text-foreground"
-                        onClick={onCancel}
-                        disabled={loading}
-                    >
-                        <X className="w-3.5 h-3.5" />Cancel — keep existing
-                    </Button>
-                    <Button
-                        variant="destructive"
-                        className="flex-1 h-9 gap-2"
-                        onClick={onConfirm}
-                        disabled={loading}
-                    >
-                        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                        Yes, proceed
-                    </Button>
+                <div className={`grid gap-2 px-5 pb-5 ${request.showNewPortOption ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                    {request.showNewPortOption && (
+                        <Button
+                            className="h-9 gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={onNewPort}
+                            disabled={loading}
+                        >
+                            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                            Use Different Port — keep existing running
+                        </Button>
+                    )}
+                    <div className={`flex gap-2 ${request.showNewPortOption ? '' : 'contents'}`}>
+                        <Button
+                            variant="outline"
+                            className="flex-1 h-9 gap-2 border-border text-muted-foreground hover:text-foreground"
+                            onClick={onCancel}
+                            disabled={loading}
+                        >
+                            <X className="w-3.5 h-3.5" />Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            className="flex-1 h-9 gap-2"
+                            onClick={onConfirm}
+                            disabled={loading}
+                        >
+                            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                            Remove & Replace
+                        </Button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1357,7 +1372,7 @@ export default function AgentPage() {
         setTimeout(() => textareaRef.current?.focus(), 50);
     }, []);
 
-    const sendConfirm = useCallback(async (confirmed: boolean) => {
+    const sendConfirm = useCallback(async (confirmed: boolean | 'new_port') => {
         if (!confirmRequest) return;
         setConfirmLoading(true);
         try {
@@ -1418,6 +1433,7 @@ export default function AgentPage() {
                 <AgentConfirmModal
                     request={confirmRequest}
                     onConfirm={() => sendConfirm(true)}
+                    onNewPort={() => sendConfirm('new_port')}
                     onCancel={() => sendConfirm(false)}
                     loading={confirmLoading}
                 />

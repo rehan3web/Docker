@@ -743,8 +743,6 @@ function awaitInput(
 
 // ── Destructive-action confirmation gate ──────────────────────────────────────
 
-const pendingConfirms = new Map<string, (confirmed: boolean) => void>();
-
 /** Returns true if the container name sounds like it holds persistent data */
 function isDataContainer(name: string): boolean {
     return /postgres|mysql|mongo|redis|mariadb|elastic|cassandra|rabbit|kafka|minio|influx|neo4j|couch|cockroach|timescale|clickhouse|meili|typesense|dynamo|sqlite|db|database/.test(
@@ -760,19 +758,48 @@ function containerExists(name: string): boolean {
     } catch { return false; }
 }
 
+/** Extract the host-side port from docker run args like ["5432:5432"] → 5432 */
+function extractHostPort(args: string[]): number | null {
+    for (const a of args) {
+        const m = String(a).match(/^(\d+):\d+$/);
+        if (m) return parseInt(m[1], 10);
+    }
+    return null;
+}
+
+/** Find the next free host port starting from base+1 */
+function findAltPort(base: number): number {
+    for (let p = base + 1; p <= base + 99; p++) {
+        try {
+            const out = execSync(`docker ps -q --filter publish=${p}`,
+                { stdio: 'pipe', timeout: 3_000 }).toString().trim();
+            if (!out) return p;
+        } catch { return p; }
+    }
+    return base + 100;
+}
+
 /**
  * Pause agent execution and ask the user for confirmation via the socket.
- * Resolves to true (proceed) or false (skip/cancel).
+ * Returns 'confirm' (proceed), 'new_port' (keep old, use alt port), or 'cancel'.
  * Auto-cancels after 10 minutes with no response.
  */
-function awaitConfirm(userId: string, agentId: string, title: string, message: string): Promise<boolean> {
+const pendingConfirms = new Map<string, (choice: 'confirm' | 'new_port' | 'cancel') => void>();
+
+function awaitConfirm(
+    userId: string,
+    agentId: string,
+    title: string,
+    message: string,
+    showNewPortOption = false
+): Promise<'confirm' | 'new_port' | 'cancel'> {
     return new Promise(resolve => {
         pendingConfirms.set(agentId, resolve);
-        emitToUser(userId, 'agent:confirm_required', { agentId, title, message });
+        emitToUser(userId, 'agent:confirm_required', { agentId, title, message, showNewPortOption });
         setTimeout(() => {
             if (pendingConfirms.has(agentId)) {
                 pendingConfirms.delete(agentId);
-                resolve(false);
+                resolve('cancel');
             }
         }, 10 * 60 * 1000);
     });
@@ -817,6 +844,60 @@ async function executeSteps(
         emitToUser(userId, 'agent:log', { agentId, type: 'error', content: msg });
     };
 
+    // ── Pre-scan: resolve any data-container conflict BEFORE running anything ──
+    // Find the first step that would stop or remove a running data container.
+    // Show a 3-option dialog so the user decides BEFORE docker_stop executes.
+    {
+        const conflictStep = steps.find(s =>
+            (s.type === 'docker_stop' || s.type === 'docker_remove') &&
+            isDataContainer((s as any).container) &&
+            containerExists((s as any).container)
+        ) as any | undefined;
+
+        if (conflictStep) {
+            info(`"${conflictStep.container}" is already running — waiting for your decision before touching anything…`);
+            const choice = await awaitConfirm(
+                userId, agentId,
+                `"${conflictStep.container}" is already running`,
+                `Your container "${conflictStep.container}" is already running and may contain data.\n\n` +
+                `• Remove & Replace — stop and remove it, then install the new container on the same port\n` +
+                `• Use Different Port — keep it running, install the new container on a free port instead\n` +
+                `• Cancel — do nothing`,
+                true // showNewPortOption
+            );
+
+            if (choice === 'cancel') {
+                info(`Cancelled — "${conflictStep.container}" was not touched.`);
+                return { failed: false, log: logLines.join('\n') };
+            }
+
+            if (choice === 'new_port') {
+                // Find the original host port from the docker_run step args
+                const runStep = steps.find(s => s.type === 'docker_run') as any | undefined;
+                const origPort = runStep ? extractHostPort(runStep.args ?? []) : null;
+                const altPort = origPort ? findAltPort(origPort) : null;
+
+                // Drop all steps that touch the existing container
+                steps = steps.filter(s =>
+                    s.type !== 'docker_stop' &&
+                    s.type !== 'docker_remove' &&
+                    s.type !== 'docker_free_port'
+                );
+
+                // Patch docker_run port binding to the free port
+                if (runStep && origPort && altPort) {
+                    runStep.args = (runStep.args as string[]).map((a: string) => {
+                        const m = typeof a === 'string' && a.match(/^(\d+):(\d+)$/);
+                        if (m && parseInt(m[1], 10) === origPort) return `${altPort}:${m[2]}`;
+                        return a;
+                    });
+                    info(`Keeping "${conflictStep.container}" running. New container will use port ${altPort} instead of ${origPort}.`);
+                }
+            }
+            // choice === 'confirm': proceed with all steps unchanged
+        }
+    }
+
     for (const step of steps) {
 
         if (step.type === 'message') {
@@ -856,19 +937,19 @@ async function executeSteps(
         }
 
         if (step.type === 'docker_remove') {
-            // Gate: ask user before removing any data container that actually exists
+            // Fallback gate (pre-scan handles the common case; this catches plans
+            // where docker_remove appears without a preceding docker_stop)
             if (isDataContainer(step.container) && containerExists(step.container)) {
                 emitToUser(userId, 'agent:log', { agentId, type: 'info',
                     content: `"${step.container}" appears to hold data — waiting for your confirmation before removing it.` });
-                const confirmed = await awaitConfirm(
+                const choice = await awaitConfirm(
                     userId, agentId,
                     `Remove "${step.container}"?`,
                     `The container "${step.container}" already exists and may contain database data.\n\nRemoving it will permanently delete any data not stored in a named volume.\n\nDo you want the agent to remove it and continue?`
                 );
-                if (!confirmed) {
+                if (choice !== 'confirm') {
                     emitToUser(userId, 'agent:log', { agentId, type: 'info',
                         content: `Cancelled — "${step.container}" was not removed. Stopping plan to keep your data safe.` });
-                    // Always halt: remaining steps assume the container was removed
                     return { failed: false, log: logLines.join('\n') };
                 }
             }
@@ -896,12 +977,12 @@ async function executeSteps(
             if (dataOnPort.length > 0) {
                 emitToUser(userId, 'agent:log', { agentId, type: 'info',
                     content: `Port ${step.port} is occupied by "${dataOnPort.join(', ')}" which may hold data — waiting for your confirmation.` });
-                const confirmed = await awaitConfirm(
+                const choice = await awaitConfirm(
                     userId, agentId,
                     `Free port ${step.port}?`,
                     `Port ${step.port} is currently used by "${dataOnPort.join(', ')}" which may contain database data.\n\nFreeing it will stop and remove that container.\n\nDo you want to continue?`
                 );
-                if (!confirmed) {
+                if (choice !== 'confirm') {
                     emitToUser(userId, 'agent:log', { agentId, type: 'info',
                         content: `Cancelled — port ${step.port} was not freed. Stopping plan to keep your data safe.` });
                     return { failed: false, log: logLines.join('\n') };
@@ -1910,11 +1991,14 @@ router.post('/input', authenticateToken, async (req, res) => {
 });
 
 router.post('/confirm', authenticateToken, async (req, res) => {
-    const { agentId, confirmed } = req.body as { agentId: string; confirmed: boolean };
+    const { agentId, confirmed } = req.body as { agentId: string; confirmed: boolean | 'new_port' };
     const resolve = pendingConfirms.get(agentId);
     if (resolve) {
         pendingConfirms.delete(agentId);
-        resolve(confirmed === true);
+        const choice: 'confirm' | 'new_port' | 'cancel' =
+            confirmed === 'new_port' ? 'new_port' :
+            confirmed === true       ? 'confirm'  : 'cancel';
+        resolve(choice);
     }
     res.json({ ok: true });
 });
