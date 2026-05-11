@@ -1046,7 +1046,7 @@ function DomainTab({ containerName }: { containerName: string }) {
     const vd = verifiedDomains.find(d => d.id === id);
     if (!vd) return;
     setSavingBase(true);
-    try { await baseDomainSave(vd.domain, vd.vps_ip); qc.invalidateQueries({ queryKey: ["base-domain"] }); }
+    try { await baseDomainSave(vd.domain, vd.vps_ip, true); qc.invalidateQueries({ queryKey: ["base-domain"] }); }
     catch (err: any) { toast.error(err.message); }
     finally { setSavingBase(false); }
   }
