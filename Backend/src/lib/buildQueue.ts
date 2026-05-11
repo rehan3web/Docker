@@ -134,9 +134,32 @@ function dockerAvailable() {
     try { return fs.existsSync('/var/run/docker.sock'); } catch { return false; }
 }
 
-function railpackAvailable() {
-    try { execSync('which railpack', { stdio: 'ignore' }); return true; } catch { return false; }
+const RAILPACK_SEARCH = [
+    process.env.RAILPACK_PATH,
+    '/home/runner/.local/bin/railpack',
+    `${process.env.HOME}/.local/bin/railpack`,
+    '/usr/local/bin/railpack',
+    '/usr/bin/railpack',
+].filter(Boolean) as string[];
+
+let _railpackPath: string | null | undefined = undefined; // undefined = not yet resolved
+
+function resolveRailpack(): string | null {
+    if (_railpackPath !== undefined) return _railpackPath;
+    // Check explicit paths first
+    for (const p of RAILPACK_SEARCH) {
+        try { if (fs.existsSync(p)) { _railpackPath = p; return p; } } catch { /* skip */ }
+    }
+    // Fall back to PATH resolution
+    try {
+        const found = execSync('which railpack 2>/dev/null', { encoding: 'utf8' }).trim();
+        if (found) { _railpackPath = found; return found; }
+    } catch { /* not in PATH */ }
+    _railpackPath = null;
+    return null;
 }
+
+function railpackAvailable() { return resolveRailpack() !== null; }
 
 // ── Core build logic ──────────────────────────────────────────────────────────
 
@@ -217,7 +240,8 @@ async function runBuild(id: string) {
 
             emitStatus(id, 'building');
             emitLog(id, 'system', `\nRailPack auto-detecting runtime and building image ${imageTag}...\n`);
-            const rpCode = await runStreamed(id, 'railpack', ['build', '.', '--name', imageTag], cloneDir);
+            const rpBin = resolveRailpack()!;
+            const rpCode = await runStreamed(id, rpBin, ['build', '--name', imageTag, '--progress', 'plain', '.'], cloneDir);
             if (rpCode !== 0) {
                 record.error = `railpack build failed (exit ${rpCode})`;
                 record.finishedAt = Date.now();
