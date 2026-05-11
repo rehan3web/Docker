@@ -1,0 +1,59 @@
+root@root:~/Docker# git pull && docker compose -f postgres.yml up -d --build docklet-server
+remote: Enumerating objects: 27, done.
+remote: Counting objects: 100% (27/27), done.
+remote: Compressing objects: 100% (14/14), done.
+remote: Total 14 (delta 11), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (14/14), 2.07 KiB | 303.00 KiB/s, done.
+From https://github.com/rehan3web/Docker
+   f54979c..038ab47  main       -> origin/main
+Updating f54979c..038ab47
+Fast-forward
+ Backend/src/lib/buildQueue.ts | 50 +++++++++++++++++++++++++++++++++++++++++++++-----
+ Backend/src/routes/deploy.ts  |  2 +-
+ Frontend/src/api/client.ts    |  1 +
+ Frontend/src/pages/deploy.tsx |  3 +++
+ 4 files changed, 50 insertions(+), 6 deletions(-)
+[+] Building 11.7s (14/14) FINISHED                                                                                    
+ => [internal] load local bake definitions                                                                        0.0s
+ => => reading from stdin 524B                                                                                    0.0s
+ => [internal] load build definition from Dockerfile                                                              0.0s
+ => => transferring dockerfile: 280B                                                                              0.0s
+ => [internal] load metadata for docker.io/library/node:20-alpine                                                 0.5s
+ => [internal] load .dockerignore                                                                                 0.0s
+ => => transferring context: 87B                                                                                  0.0s
+ => [1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f60  0.0s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f60  0.0s
+ => [internal] load build context                                                                                 0.0s
+ => => transferring context: 32.02kB                                                                              0.0s
+ => CACHED [2/7] RUN apk add --no-cache postgresql-client docker-cli docker-compose bash git util-linux           0.0s
+ => CACHED [3/7] WORKDIR /usr/src/app                                                                             0.0s
+ => CACHED [4/7] COPY package*.json ./                                                                            0.0s
+ => CACHED [5/7] RUN npm install                                                                                  0.0s
+ => [6/7] COPY . .                                                                                                0.1s
+ => [7/7] RUN npm run build                                                                                      10.5s
+ => exporting to image                                                                                            0.3s 
+ => => exporting layers                                                                                           0.1s 
+ => => exporting manifest sha256:59bdbb6b26b2c0433e2c392122b1902f5ba88fe80e7ec4c82e73b485c7d231a0                 0.0s
+ => => exporting config sha256:523c802d12960329ef47659f3af744c68b510b49b6e8a89a20d762809d06525d                   0.0s
+ => => exporting attestation manifest sha256:614010d8cd3c03acefd02ad708e2470d621a82bfdc28a9623721009861dc14b4     0.0s
+ => => exporting manifest list sha256:337a771279ef021ba3675c3583508e1b9b9c20e5569ba19e0e5d6fc8abc40034            0.0s
+ => => naming to docker.io/library/docklet-docklet-server:latest                                                  0.0s
+ => => unpacking to docker.io/library/docklet-docklet-server:latest                                               0.1s
+ => resolving provenance for metadata file                                                                        0.0s
+[+] up 5/5
+ ✔ Image docklet-docklet-server Built                                                                             11.8s
+ ✔ Container docklet-db         Healthy                                                                            1.2s
+ ✔ Container docklet-redis      Healthy                                                                            1.7s
+ ✔ Container docklet-pooler     Running                                                                            0.0s
+ ✔ Container docklet-server     Started                                                                            1.9s
+root@root:~/Docker# docker ps
+CONTAINER ID   IMAGE                                        COMMAND                  CREATED              STATUS                       PORTS                                      NAMES
+7e269fe6ce11   docklet-todo-list-dep_1778488323460_gbumx2   "/bin/bash -c 'caddy…"   21 seconds ago       Up 20 seconds                                                           nb-todo-list-dep_1778488323460_gbumx2
+0fe0dcf4c8e6   docklet-docklet-server                       "docker-entrypoint.s…"   About a minute ago   Up About a minute            127.0.0.1:3001->3001/tcp                   docklet-server
+2f0f9ebca7a7   moby/buildkit                                "/usr/bin/buildkitd-…"   18 minutes ago       Up 18 minutes                                                           docklet-buildkit
+a13de98d5465   docklet-docklet-client                       "/docker-entrypoint.…"   38 minutes ago       Up 38 minutes                0.0.0.0:3000->80/tcp                       docklet-client
+6132586961d3   redis:7-alpine                               "docker-entrypoint.s…"   About an hour ago    Up About an hour (healthy)   6379/tcp                                   docklet-redis
+e98d29eed048   traefik:v3.3                                 "/entrypoint.sh --lo…"   2 hours ago          Up 2 hours                   0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp   docklet-traefik
+4059652f029b   edoburu/pgbouncer:latest                     "/entrypoint.sh /usr…"   16 hours ago         Up 16 hours                  127.0.0.1:16543->5432/tcp                  docklet-pooler
+d24e8db0f1cc   postgres:15                                  "docker-entrypoint.s…"   16 hours ago         Up 16 hours (healthy)        127.0.0.1:15432->5432/tcp                  docklet-db
+root@root:~/Docker# 

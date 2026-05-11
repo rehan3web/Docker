@@ -450,13 +450,11 @@ async function runBuild(id: string) {
             emitLog(id, 'system', '\nRailPack build complete — starting container\n');
 
             // Detect the port the image exposes (railpack bakes this in)
-            const rpPort = inspectExposedPort(imageTag);
-            if (rpPort) {
-                record.containerPort = rpPort;
-                emitLog(id, 'system', `Detected container port ${rpPort} — routing via Traefik (docklet-apps network)\n`);
-            } else {
-                emitLog(id, 'system', 'No exposed port detected — container will run without port routing\n');
-            }
+            // Railpack runtime images don't always set EXPOSE (Caddy omits it).
+            // Fall back to 80 — railpack's default for all Caddy/static sites.
+            const rpPort = inspectExposedPort(imageTag) ?? 80;
+            record.containerPort = rpPort;
+            emitLog(id, 'system', `Container port ${rpPort}${inspectExposedPort(imageTag) ? ' (from image EXPOSE)' : ' (railpack default)'} — routing via Traefik on docklet-apps network\n`);
 
             // Railpack containers join the Traefik network so the Reverse Proxy
             // Manager can route a domain → http://containerName:containerPort

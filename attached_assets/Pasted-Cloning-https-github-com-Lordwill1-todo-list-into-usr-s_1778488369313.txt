@@ -1,0 +1,109 @@
+Cloning https://github.com/Lordwill1/todo-list into /usr/src/app/.docklet-deploys/todo-list-dep_1778488323460_gbumx2
+
+$ git clone --depth 1 https://github.com/Lordwill1/todo-list /usr/src/app/.docklet-deploys/todo-list-dep_1778488323460_gbumx2
+Cloning into '/usr/src/app/.docklet-deploys/todo-list-dep_1778488323460_gbumx2'...
+
+No Dockerfile found → using RailPack auto-detect build
+Downloading mise 2026.3.17 (linux-x64-musl)...
+mise 2026.3.17 ready (84.6 MB) at /tmp/railpack/mise/mise-2026.3.17
+Installing railpack v0.23.0...
+railpack v0.23.0 installed
+BuildKit daemon already running
+
+RailPack auto-detecting runtime and building image docklet-todo-list-dep_1778488323460_gbumx2...
+
+$ railpack build --name docklet-todo-list-dep_1778488323460_gbumx2 --progress plain .
+                   
+╭─────────────────╮
+│ Railpack 0.23.0 │
+╰─────────────────╯
+
+  ↳ Detected Staticfile
+  ↳ Using staticfile root dir: .
+            
+  Packages  
+  ──────────
+  caddy  │  2.11.2  │  railpack default (2)
+            
+  Steps     
+  ──────────
+  ▸ build
+    $ caddy fmt --overwrite Caddyfile
+            
+  Deploy    
+  ──────────
+    $ caddy run --config Caddyfile --adapter caddyfile 2>&1
+
+#1 loading .
+#1 DONE 0.0s
+
+#2 docker-image://ghcr.io/railwayapp/railpack-builder:mise-2026.3.17
+#2 resolve ghcr.io/railwayapp/railpack-builder:mise-2026.3.17
+#2 ...
+
+#3 [railpack] secrets hash
+#3 DONE 0.0s
+
+#4 docker-image://ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17
+#4 resolve ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17
+#4 resolve ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17 0.4s done
+#4 DONE 0.4s
+
+#2 docker-image://ghcr.io/railwayapp/railpack-builder:mise-2026.3.17
+#2 resolve ghcr.io/railwayapp/railpack-builder:mise-2026.3.17 0.5s done
+#2 DONE 0.5s
+
+#1 loading .
+#1 transferring context: 53.50kB 0.0s done
+#1 DONE 0.0s
+
+#5 mise install-into caddy@2.11.2 /railpack/caddy
+#5 CACHED
+
+#3 [railpack] secrets hash
+#3 CACHED
+
+#6 copy / /app
+#6 DONE 0.2s
+
+#7 mkdir /app
+#7 DONE 0.0s
+
+#8 mkfile /app/Caddyfile
+#8 DONE 0.0s
+
+#9 caddy fmt --overwrite Caddyfile
+#9 DONE 0.1s
+
+#4 docker-image://ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17
+#4 CACHED
+
+#10 copy /railpack/caddy
+#10 CACHED
+
+#11 copy /app
+#11 DONE 0.0s
+
+#12 [railpack] merge ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17, $packages:caddy, $build
+#12 DONE 0.0s
+
+#13 exporting to docker image format
+#13 exporting layers 0.0s done
+#13 exporting manifest sha256:9580047fd6a4b668a5f396fded572b2ac4ffa5edf4ca4e38554704f83e2783fa done
+#13 exporting config sha256:690abb9f7f724b2740b7b7203ae00fc4f30ece40fa082c02550a953ec6098fd2 done
+#13 sending tarball
+#13 sending tarball 1.4s done
+#13 DONE 1.5s
+Loaded image: docklet-todo-list-dep_1778488323460_gbumx2:latest
+ INFO Successfully built image in 3.10s
+ INFO Run with `docker run -it docklet-todo-list-dep_1778488323460_gbumx2`
+
+RailPack build complete — starting container
+No exposed port detected — container will run without port routing
+
+Starting container nb-todo-list-dep_1778488323460_gbumx2
+
+$ docker run -d --name nb-todo-list-dep_1778488323460_gbumx2 --network docklet-apps docklet-todo-list-dep_1778488323460_gbumx2
+7e269fe6ce1111b6658a44395a7fa883e898cdcb6551297fd436fa40c720a946
+
+Deployment successful: container nb-todo-list-dep_1778488323460_gbumx2 is running.
