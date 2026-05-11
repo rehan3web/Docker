@@ -1,0 +1,99 @@
+wnloading mise 2026.3.17 (linux-x64-musl)...
+mise 2026.3.17 ready (84.6 MB) at /tmp/railpack/mise/mise-2026.3.17
+Installing railpack v0.23.0...
+railpack v0.23.0 installed
+BuildKit daemon already running
+
+RailPack auto-detecting runtime and building image docklet-todo-list-dep_1778488632318_07ak53...
+
+$ railpack build --name docklet-todo-list-dep_1778488632318_07ak53 --progress plain .
+                   
+╭─────────────────╮
+│ Railpack 0.23.0 │
+╰─────────────────╯
+
+  ↳ Detected Staticfile
+  ↳ Using staticfile root dir: .
+            
+  Packages  
+  ──────────
+  caddy  │  2.11.2  │  railpack default (2)
+            
+  Steps     
+  ──────────
+  ▸ build
+    $ caddy fmt --overwrite Caddyfile
+            
+  Deploy    
+  ──────────
+    $ caddy run --config Caddyfile --adapter caddyfile 2>&1
+
+#1 loading .
+#1 DONE 0.0s
+
+#2 [railpack] secrets hash
+#2 DONE 0.0s
+
+#3 docker-image://ghcr.io/railwayapp/railpack-builder:mise-2026.3.17
+#3 resolve ghcr.io/railwayapp/railpack-builder:mise-2026.3.17
+#3 resolve ghcr.io/railwayapp/railpack-builder:mise-2026.3.17 0.4s done
+#3 DONE 0.4s
+
+#4 docker-image://ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17
+#4 resolve ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17 0.4s done
+#4 DONE 0.4s
+
+#1 loading .
+#1 transferring context: 53.50kB 0.0s done
+#1 DONE 0.0s
+
+#5 mise install-into caddy@2.11.2 /railpack/caddy
+#5 CACHED
+
+#2 [railpack] secrets hash
+#2 CACHED
+
+#6 copy / /app
+#6 DONE 0.2s
+
+#7 mkdir /app
+#7 DONE 0.0s
+
+#8 mkfile /app/Caddyfile
+#8 DONE 0.0s
+
+#9 caddy fmt --overwrite Caddyfile
+#9 DONE 0.1s
+
+#4 docker-image://ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17
+#4 CACHED
+
+#10 copy /railpack/caddy
+#10 CACHED
+
+#11 copy /app
+#11 DONE 0.0s
+
+#12 [railpack] merge ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17, $packages:caddy, $build
+#12 DONE 0.0s
+
+#13 exporting to docker image format
+#13 exporting layers 0.0s done
+#13 exporting manifest sha256:cb71bbcbd9f442c3a6e3608a45c16653878a2a3a1ef5bca3a7284e9e614b9c37 done
+#13 exporting config sha256:2b5beae7e641f8cf4a4e944b1827b301aa077a805a94086784909c9dc64253a7 done
+#13 sending tarball
+#13 sending tarball 1.4s done
+#13 DONE 1.5s
+Loaded image: docklet-todo-list-dep_1778488632318_07ak53:latest
+ INFO Successfully built image in 2.97s
+ INFO Run with `docker run -it docklet-todo-list-dep_1778488632318_07ak53`
+
+RailPack build complete — starting container
+Container port 80 (railpack default) — routing via Traefik on docklet-apps network
+
+Starting container nb-todo-list-dep_1778488632318_07ak53
+
+$ docker run -d --name nb-todo-list-dep_1778488632318_07ak53 --network docklet-apps docklet-todo-list-dep_1778488632318_07ak53
+a117b1c93c8093c4e834bfe14277d6b8c189c69ba7b453c7f169c78798c3778c
+
+Deployment successful: container nb-todo-list-dep_1778488632318_07ak53 is running — on network docklet-apps, internal port 80.
