@@ -26,7 +26,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { ...authHeaders(), ...(init?.headers || {}) },
   });
-  if (res.status === 401 && path !== "/auth/login") {
+  if (res.status === 401 && path !== "/auth/login" && path !== "/auth/2fa/verify-login") {
     // Read the body first — a 401 from a proxied/upstream service (e.g.
     // NVIDIA) should NOT clear the session. Only redirect to login when the
     // backend itself says the token is invalid (body has no 'message' field

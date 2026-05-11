@@ -53,9 +53,16 @@ export default function LoginPage() {
             await twoFaVerifyLogin(otpToken, code);
             setLocation("/");
         } catch (err: any) {
-            setError(err.message || "Invalid code");
-            setOtp(["", "", "", "", "", ""]);
-            otpRefs.current[0]?.focus();
+            const msg: string = err.message || "";
+            if (msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("log in again")) {
+                setStep("credentials");
+                setOtp(["", "", "", "", "", ""]);
+                setError("Session expired — please sign in again");
+            } else {
+                setError("Invalid code — try again");
+                setOtp(["", "", "", "", "", ""]);
+                setTimeout(() => otpRefs.current[0]?.focus(), 0);
+            }
         } finally {
             setIsLoading(false);
         }
