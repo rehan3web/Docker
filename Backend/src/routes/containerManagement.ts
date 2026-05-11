@@ -685,12 +685,15 @@ router.get('/base-domain', async (_req, res) => {
 });
 
 router.post('/base-domain', async (req, res) => {
-    const { domain, vps_ip } = req.body;
+    const { domain, vps_ip, verified } = req.body;
     if (!domain || !vps_ip) return res.status(400).json({ message: 'domain and vps_ip required' });
+    // When a domain is picked from the already-verified verified_domains table,
+    // the caller passes verified=true so we skip the separate DNS verify step.
+    const isVerified = verified === true;
     await executeQuery(
-        `INSERT INTO base_domain_config (id, domain, vps_ip, verified) VALUES (1, $1, $2, FALSE)
-         ON CONFLICT (id) DO UPDATE SET domain=$1, vps_ip=$2, verified=FALSE`,
-        [domain.toLowerCase().trim(), vps_ip.trim()]
+        `INSERT INTO base_domain_config (id, domain, vps_ip, verified) VALUES (1, $1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET domain=$1, vps_ip=$2, verified=$3`,
+        [domain.toLowerCase().trim(), vps_ip.trim(), isVerified]
     );
     res.json({ ok: true });
 });

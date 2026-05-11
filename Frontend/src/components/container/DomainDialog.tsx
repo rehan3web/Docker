@@ -75,7 +75,8 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
     if (!vd) return;
     setSavingBase(true);
     try {
-      await baseDomainSave(vd.domain, vd.vps_ip);
+      // Pass verified=true — the domain is already verified in verified_domains table
+      await baseDomainSave(vd.domain, vd.vps_ip, true);
       qc.invalidateQueries({ queryKey: ["base-domain"] });
     } catch (err: any) {
       toast.error(err.message);

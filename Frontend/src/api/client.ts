@@ -952,8 +952,8 @@ export function useGetBaseDomain() {
     staleTime: 30000,
   });
 }
-export const baseDomainSave = (domain: string, vps_ip: string) =>
-  mgmt('/base-domain', { method: "POST", ...j({ domain, vps_ip }) });
+export const baseDomainSave = (domain: string, vps_ip: string, verified = false) =>
+  mgmt('/base-domain', { method: "POST", ...j({ domain, vps_ip, verified }) });
 export const baseDomainVerify = () =>
   mgmt('/base-domain/verify', { method: "POST" }) as Promise<{ verified: boolean; apexOk: boolean; wildcardOk: boolean; apexIps: string[]; wildcardIps: string[]; vps_ip: string }>;
 
