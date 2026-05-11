@@ -43,6 +43,18 @@ interface StructuredResult {
     sections: LogSection[];
 }
 
+interface ChatMessage {
+    id: string;
+    userText: string;
+    sections: LogSection[];
+    done: boolean;
+    success: boolean;
+    taskType: string;
+    intent: string;
+    summary: string;
+    rawLogs: LogEntry[];
+}
+
 interface ConfirmRequest {
     agentId: string;
     title: string;
@@ -459,14 +471,102 @@ function DockerHubPanel({ onInsert }: { onInsert: (text: string) => void }) {
     );
 }
 
+// ── Live log → section routing ────────────────────────────────────────────────
+
+const LOG_SECTION_MAP: Record<string, { id: string; title: string }> = {
+    thinking:       { id: "planning",     title: "Planning"     },
+    info:           { id: "status",       title: "Status"       },
+    command:        { id: "commands",     title: "Commands"     },
+    output:         { id: "commands",     title: "Commands"     },
+    success:        { id: "results",      title: "Results"      },
+    error:          { id: "errors",       title: "Errors"       },
+    ai:             { id: "summary",      title: "Task Summary" },
+    verify:         { id: "verification", title: "Verification" },
+    retry:          { id: "warnings",     title: "Warnings"     },
+    docker_missing: { id: "errors",       title: "Errors"       },
+};
+function logSectionFor(type: string) {
+    return LOG_SECTION_MAP[type] ?? { id: "status", title: "Status" };
+}
+
+// ── History detail modal ───────────────────────────────────────────────────────
+
+function HistoryDetailModal({ task, onClose, onRerun }: {
+    task: AgentTask;
+    onClose: () => void;
+    onRerun: (intent: string) => void;
+}) {
+    const [detail, setDetail] = useState<AgentTaskDetail | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        apiFetch<AgentTaskDetail>(`/agent/tasks/${task.id}`)
+            .then(d => setDetail(d))
+            .catch(() => {})
+            .finally(() => setLoading(false));
+    }, [task.id]);
+
+    return (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+            <div className="flex items-center gap-3 px-4 h-14 border-b border-border shrink-0">
+                <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted">
+                    <X className="w-5 h-5" />
+                </button>
+                <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">{task.intent}</p>
+                    <p className="text-[11px] text-muted-foreground">{fmtRelative(task.created_at)}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                    {task.status === "completed" && <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-primary/10 text-primary border-primary/20">✓ Done</Badge>}
+                    {task.status === "failed"    && <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-destructive/10 text-destructive border-destructive/30">✗ Failed</Badge>}
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => { onRerun(task.intent); onClose(); }}>
+                        <RotateCcw className="w-3 h-3" />Re-run
+                    </Button>
+                </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+                <div className="max-w-3xl mx-auto space-y-4">
+                    <div className="flex justify-end">
+                        <div className="max-w-[85%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed">
+                            {task.intent}
+                        </div>
+                    </div>
+                    <div className="flex gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                            <Bot className="w-3.5 h-3.5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            {loading && <div className="text-sm text-muted-foreground py-2">Loading…</div>}
+                            {detail && (
+                                <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+                                    <div className="p-3 space-y-0.5 max-h-[70vh] overflow-y-auto">
+                                        {(detail.log_json || []).map((line, i) => {
+                                            let type: LogEntry["type"] = "info";
+                                            let content = line;
+                                            if (line.startsWith("$ "))           { type = "command"; content = line.slice(2); }
+                                            else if (line.startsWith("[ok] "))    { type = "success"; content = line.slice(5); }
+                                            else if (line.startsWith("[error] ")) { type = "error";   content = line.slice(8); }
+                                            else if (line.startsWith("[ai] "))    { type = "ai";      content = line.slice(5); }
+                                            else if (line.startsWith("[info] "))  { type = "info";    content = line.slice(7); }
+                                            return <LogLine key={i} entry={{ type, content, ts: 0 }} />;
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ── History panel ─────────────────────────────────────────────────────────────
 
 function HistoryPanel({ onRerun }: { onRerun: (intent: string) => void }) {
     const [tasks, setTasks] = useState<AgentTask[]>([]);
     const [loading, setLoading] = useState(true);
-    const [expanded, setExpanded] = useState<string | null>(null);
-    const [detail, setDetail] = useState<AgentTaskDetail | null>(null);
-    const [detailLoading, setDetailLoading] = useState(false);
+    const [viewTask, setViewTask] = useState<AgentTask | null>(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -476,27 +576,27 @@ function HistoryPanel({ onRerun }: { onRerun: (intent: string) => void }) {
 
     useEffect(() => { load(); }, [load]);
 
-    const toggleDetail = async (id: string) => {
-        if (expanded === id) { setExpanded(null); setDetail(null); return; }
-        setExpanded(id); setDetailLoading(true);
-        try { const d = await apiFetch<AgentTaskDetail>(`/agent/tasks/${id}`); setDetail(d); }
-        catch { setDetail(null); } finally { setDetailLoading(false); }
-    };
-
     return (
-        <div className="flex flex-col h-full gap-3">
-            <div className="flex items-center justify-between">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Recent Tasks</span>
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1.5" onClick={load}>
-                    <RefreshCw className="w-3.5 h-3.5" />Refresh
-                </Button>
-            </div>
-            <div className="overflow-y-auto flex-1 space-y-1.5">
-                {loading && <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>}
-                {!loading && tasks.length === 0 && <div className="text-sm text-muted-foreground py-10 text-center">No tasks yet</div>}
-                {tasks.map(t => (
-                    <div key={t.id} className="rounded-lg border border-border bg-card overflow-hidden">
-                        <button onClick={() => toggleDetail(t.id)} className="w-full text-left flex items-start gap-3 px-3 py-2.5 hover:bg-muted/40 transition-colors">
+        <>
+            {viewTask && (
+                <HistoryDetailModal task={viewTask} onClose={() => setViewTask(null)} onRerun={onRerun} />
+            )}
+            <div className="flex flex-col h-full gap-3">
+                <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Recent Tasks</span>
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1.5" onClick={load}>
+                        <RefreshCw className="w-3.5 h-3.5" />Refresh
+                    </Button>
+                </div>
+                <div className="overflow-y-auto flex-1 space-y-1.5">
+                    {loading && <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>}
+                    {!loading && tasks.length === 0 && <div className="text-sm text-muted-foreground py-10 text-center">No tasks yet</div>}
+                    {tasks.map(t => (
+                        <button
+                            key={t.id}
+                            onClick={() => setViewTask(t)}
+                            className="w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors"
+                        >
                             <div className="shrink-0 mt-0.5">
                                 {t.status === "running"   && <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />}
                                 {t.status === "completed" && <CheckCircle className="w-3.5 h-3.5 text-primary" />}
@@ -510,29 +610,12 @@ function HistoryPanel({ onRerun }: { onRerun: (intent: string) => void }) {
                                 </div>
                                 {t.summary && <p className="text-xs text-muted-foreground mt-0.5 truncate">{t.summary}</p>}
                             </div>
-                            <ChevronDown className={cn("w-4 h-4 text-muted-foreground shrink-0 transition-transform mt-0.5", expanded === t.id && "rotate-180")} />
+                            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                         </button>
-                        {expanded === t.id && (
-                            <div className="border-t border-border px-3 py-2.5 space-y-2 bg-muted/20">
-                                {detailLoading && <div className="text-xs text-muted-foreground">Loading logs…</div>}
-                                {detail && detail.id === t.id && (
-                                    <>
-                                        <div className="bg-background border border-border rounded-lg p-3 max-h-48 overflow-y-auto space-y-0.5">
-                                            {(detail.log_json || []).map((line, i) => (
-                                                <div key={i} className="text-[11px] font-mono text-muted-foreground whitespace-pre-wrap break-all">{line}</div>
-                                            ))}
-                                        </div>
-                                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => onRerun(t.intent)}>
-                                            <RotateCcw className="w-3 h-3" />Re-run
-                                        </Button>
-                                    </>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
-        </div>
+        </>
     );
 }
 
@@ -892,6 +975,10 @@ const SECTION_CONFIG: Record<string, { icon: React.ReactNode; border: string; bg
     fixes:           { icon: <Wrench className="w-3.5 h-3.5" />,       border: "border-border",        bg: "bg-muted/10",      badge: "bg-muted text-muted-foreground border-border",           defaultOpen: false },
     recommendations: { icon: <Lightbulb className="w-3.5 h-3.5" />,   border: "border-border",        bg: "bg-muted/10",      badge: "bg-muted text-muted-foreground border-border",           defaultOpen: false },
     execution:       { icon: <Terminal className="w-3.5 h-3.5" />,     border: "border-border/50",     bg: "bg-muted/5",       badge: "bg-muted/60 text-muted-foreground border-border",        defaultOpen: false },
+    planning:        { icon: <Search className="w-3.5 h-3.5" />,       border: "border-border/50",     bg: "bg-muted/5",       badge: "bg-muted/60 text-muted-foreground border-border",        defaultOpen: true  },
+    status:          { icon: <Info className="w-3.5 h-3.5" />,         border: "border-border/50",     bg: "bg-muted/5",       badge: "bg-muted/60 text-muted-foreground border-border",        defaultOpen: true  },
+    commands:        { icon: <Terminal className="w-3.5 h-3.5" />,     border: "border-border/50",     bg: "bg-muted/5",       badge: "bg-muted/60 text-muted-foreground border-border",        defaultOpen: true  },
+    verification:    { icon: <CheckCircle className="w-3.5 h-3.5" />,  border: "border-border/50",     bg: "bg-muted/5",       badge: "bg-muted/60 text-muted-foreground border-border",        defaultOpen: true  },
 };
 
 function SectionEntry({ type, content }: { type: string; content: string }) {
@@ -973,77 +1060,74 @@ function ResultSection({ section }: { section: LogSection }) {
     );
 }
 
-function StructuredResultView({
-    result,
-    rawLogs,
-    onNewTask,
-}: {
-    result: StructuredResult;
-    rawLogs: LogEntry[];
-    onNewTask: () => void;
-}) {
-    const [showRaw, setShowRaw] = useState(false);
-    const taskCfg = TASK_TYPE_CONFIG[result.taskType] ?? TASK_TYPE_CONFIG.general;
+// ── Raw log toggle ────────────────────────────────────────────────────────────
 
+function RawLogToggle({ logs }: { logs: LogEntry[] }) {
+    const [show, setShow] = useState(false);
+    if (logs.length === 0) return null;
     return (
-        <div className="flex flex-col h-full overflow-y-auto">
-            <div className="p-4 space-y-3">
-                {/* Task type + status banner */}
-                <div className={cn("rounded-xl border p-4", result.success ? "border-primary/30 bg-primary/5" : "border-destructive/30 bg-destructive/5")}>
-                    <div className="flex items-start gap-3">
-                        <div className={cn("p-2 rounded-lg border shrink-0", taskCfg.color)}>
-                            {taskCfg.icon}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="outline" className={cn("text-[10px] font-semibold px-2 py-0 rounded-full uppercase tracking-wider", taskCfg.color)}>
-                                    {taskCfg.label}
-                                </Badge>
-                                {result.success ? (
-                                    <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full bg-primary/10 text-primary border-primary/20">
-                                        ✓ Completed
-                                    </Badge>
-                                ) : (
-                                    <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full bg-destructive/10 text-destructive border-destructive/30">
-                                        ✗ Failed
-                                    </Badge>
-                                )}
-                            </div>
-                            <p className="text-sm font-medium text-foreground mt-1.5 leading-snug">{result.intent}</p>
-                            {result.summary && result.summary !== result.intent && (
-                                <p className="text-xs text-muted-foreground mt-1">{result.summary}</p>
-                            )}
-                        </div>
-                    </div>
+        <div className="rounded-lg border border-border/50 overflow-hidden">
+            <button
+                onClick={() => setShow(v => !v)}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+            >
+                <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span className="text-xs font-medium text-muted-foreground flex-1">Raw Execution Log</span>
+                <span className="text-[10px] text-muted-foreground">{logs.length} lines</span>
+                {show ? <EyeOff className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <Eye className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+            </button>
+            {show && (
+                <div className="border-t border-border/50 p-3 space-y-0.5 max-h-60 overflow-y-auto bg-background">
+                    {logs.map((entry, i) => <LogLine key={i} entry={entry} />)}
                 </div>
+            )}
+        </div>
+    );
+}
 
-                {/* Sections */}
-                {result.sections.map(s => (
-                    <ResultSection key={s.id} section={s} />
-                ))}
+// ── Chat message view (one user + agent pair) ─────────────────────────────────
 
-                {/* Raw log toggle */}
-                <div className="rounded-lg border border-border/50 overflow-hidden">
-                    <button
-                        onClick={() => setShowRaw(v => !v)}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
-                    >
-                        <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                        <span className="text-xs font-medium text-muted-foreground flex-1">Raw Execution Log</span>
-                        <span className="text-[10px] text-muted-foreground">{rawLogs.length} lines</span>
-                        {showRaw ? <EyeOff className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <Eye className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-                    </button>
-                    {showRaw && (
-                        <div className="border-t border-border/50 p-3 space-y-0.5 max-h-80 overflow-y-auto bg-background">
-                            {rawLogs.map((entry, i) => <LogLine key={i} entry={entry} />)}
+function ChatMessageView({ message, isLast, running }: {
+    message: ChatMessage;
+    isLast: boolean;
+    running: boolean;
+}) {
+    const isStreaming = isLast && running && !message.done;
+    return (
+        <div className="flex flex-col gap-3">
+            {/* User bubble */}
+            <div className="flex justify-end">
+                <div className="max-w-[85%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed">
+                    {message.userText}
+                </div>
+            </div>
+
+            {/* Agent response */}
+            <div className="flex gap-2.5">
+                <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+                    {isStreaming
+                        ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                        : <Bot className="w-3.5 h-3.5 text-primary" />
+                    }
+                </div>
+                <div className="flex-1 min-w-0 flex flex-col gap-2">
+                    {/* Sections — build up in real-time as logs arrive */}
+                    {message.sections.map(section => (
+                        <ResultSection key={section.id} section={section} />
+                    ))}
+
+                    {/* Typing dots while waiting for first log */}
+                    {isStreaming && message.sections.length === 0 && (
+                        <div className="flex items-center gap-1 py-2 px-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
                         </div>
                     )}
-                </div>
 
-                {/* New task button */}
-                <Button variant="outline" className="w-full gap-2 h-9" onClick={onNewTask}>
-                    <Send className="w-3.5 h-3.5" />New Task
-                </Button>
+                    {/* Collapsible raw log after task completes */}
+                    {message.done && <RawLogToggle logs={message.rawLogs} />}
+                </div>
             </div>
         </div>
     );
@@ -1066,128 +1150,90 @@ const SUGGESTIONS = [
 // ── Chat / log area ───────────────────────────────────────────────────────────
 
 function ChatArea({
-    logs, running, dockerMissing, onInstallDocker,
+    messages, running, dockerMissing, onInstallDocker,
     prompt, setPrompt, onRun, onCancel, textareaRef, isMobile,
-    structuredResult, onClearResult,
 }: {
-    logs: LogEntry[]; running: boolean; dockerMissing: boolean;
+    messages: ChatMessage[]; running: boolean; dockerMissing: boolean;
     onInstallDocker: () => void; prompt: string; setPrompt: (v: string) => void;
     onRun: (text?: string) => void; onCancel: () => void;
     textareaRef: React.RefObject<HTMLTextAreaElement>; isMobile: boolean;
-    structuredResult: StructuredResult | null;
-    onClearResult: () => void;
 }) {
-    const logEndRef = useRef<HTMLDivElement>(null);
-    useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
-
-    // Show structured result if available and not actively running
-    const showStructured = !!structuredResult && !running;
+    const bottomRef = useRef<HTMLDivElement>(null);
+    useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
     return (
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
-            {/* Output area — live log OR structured result */}
-            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-
-                {/* Header bar */}
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-2">
-                        <div className="flex gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-border" />
-                            <span className="w-2 h-2 rounded-full bg-border" />
-                            <span className="w-2 h-2 rounded-full bg-border" />
-                        </div>
-                        <Terminal className="w-3.5 h-3.5 text-muted-foreground ml-1" />
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                            {showStructured ? "Result" : "Live Output"}
-                        </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {running && (
-                            <div className="flex items-center gap-1.5">
-                                <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                                </span>
-                                <span className="text-[10px] text-primary font-medium">Running</span>
+            {/* Scrollable message list */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="p-4 space-y-6 max-w-3xl mx-auto">
+                    {/* Empty state */}
+                    {messages.length === 0 && !running && (
+                        <div className="flex flex-col items-center justify-center gap-6 text-center py-16 px-4">
+                            <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20">
+                                <Bot className="w-8 h-8 text-primary" />
                             </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Structured result view */}
-                {showStructured && (
-                    <StructuredResultView
-                        result={structuredResult}
-                        rawLogs={logs}
-                        onNewTask={onClearResult}
-                    />
-                )}
-
-                {/* Live log view — shown while running or when no result yet */}
-                {!showStructured && (
-                    <div className="flex-1 overflow-y-auto min-h-0">
-                        <div className="p-4 space-y-0.5">
-                            {logs.length === 0 && !running && (
-                                <div className="flex flex-col items-center justify-center gap-6 text-center py-12 px-4">
-                                    <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20">
-                                        <Bot className="w-8 h-8 text-primary" />
-                                    </div>
-                                    <div>
-                                        <h2 className="text-2xl font-normal tracking-tight text-foreground">DevOps Agent</h2>
-                                        <p className="text-sm text-muted-foreground mt-2 max-w-xs leading-relaxed">
-                                            Describe any Docker task in plain English. The agent searches DockerHub live,
-                                            plans steps, executes, verifies, and self-heals on failure.
-                                        </p>
-                                    </div>
-                                    <div className={cn("grid gap-2 w-full max-w-sm", isMobile ? "grid-cols-2" : "grid-cols-1")}>
-                                        {SUGGESTIONS.slice(0, isMobile ? 6 : 5).map(s => (
-                                            <button
-                                                key={s}
-                                                onClick={() => onRun(s)}
-                                                className="text-xs text-left px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted/50 hover:border-primary/30 transition-all text-muted-foreground hover:text-foreground"
-                                            >
-                                                {s}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {logs.map((entry, i) => <LogLine key={i} entry={entry} />)}
-
-                            {dockerMissing && (
-                                <div className="mt-4 p-4 rounded-lg border border-amber-500/30 bg-amber-500/5">
-                                    <p className="text-sm font-semibold text-amber-500 flex items-center gap-2">
-                                        <AlertTriangle className="w-4 h-4" />Docker Not Available
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-1 mb-3">Docker is not installed or not running on this host.</p>
-                                    <Button variant="outline" className="h-8 text-xs border-amber-500/40 text-amber-500 hover:bg-amber-500/10 gap-2" onClick={onInstallDocker}>
-                                        <Zap className="w-3.5 h-3.5" />Install Docker Automatically
-                                    </Button>
-                                </div>
-                            )}
-                            <div ref={logEndRef} />
+                            <div>
+                                <h2 className="text-2xl font-normal tracking-tight text-foreground">DevOps Agent</h2>
+                                <p className="text-sm text-muted-foreground mt-2 max-w-xs leading-relaxed">
+                                    Describe any Docker task in plain English. The agent plans, executes, and self-heals.
+                                </p>
+                            </div>
+                            <div className={cn("grid gap-2 w-full max-w-sm", isMobile ? "grid-cols-2" : "grid-cols-1")}>
+                                {SUGGESTIONS.slice(0, isMobile ? 6 : 5).map(s => (
+                                    <button
+                                        key={s}
+                                        onClick={() => onRun(s)}
+                                        className="text-xs text-left px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted/50 hover:border-primary/30 transition-all text-muted-foreground hover:text-foreground"
+                                    >
+                                        {s}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                    </div>
-                )}
+                    )}
+
+                    {/* Message pairs */}
+                    {messages.map((msg, i) => (
+                        <ChatMessageView
+                            key={msg.id}
+                            message={msg}
+                            isLast={i === messages.length - 1}
+                            running={running}
+                        />
+                    ))}
+
+                    {/* Docker missing banner */}
+                    {dockerMissing && (
+                        <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                            <p className="text-sm font-semibold text-amber-500 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4" />Docker Not Available
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1 mb-3">Docker is not installed or not running on this host.</p>
+                            <Button variant="outline" className="h-8 text-xs border-amber-500/40 text-amber-500 hover:bg-amber-500/10 gap-2" onClick={onInstallDocker}>
+                                <Zap className="w-3.5 h-3.5" />Install Docker Automatically
+                            </Button>
+                        </div>
+                    )}
+
+                    <div ref={bottomRef} />
+                </div>
             </div>
 
-            {/* Prompt bar — hidden when showing structured result (use "New Task" button instead) */}
-            {!showStructured && (
-                <div className="border-t border-border px-4 py-3 bg-background space-y-2 shrink-0">
-                    <div className="flex gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
-                        {SUGGESTIONS.map(s => (
-                            <button
-                                key={s}
-                                onClick={() => onRun(s)}
-                                className="text-xs px-2.5 py-1 rounded-full border border-border bg-muted/40 hover:bg-muted hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all whitespace-nowrap shrink-0"
-                            >
-                                {s}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex gap-2">
-                        <textarea
+            {/* Prompt bar — always visible */}
+            <div className="border-t border-border px-4 py-3 bg-background space-y-2 shrink-0">
+                <div className="flex gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+                    {SUGGESTIONS.map(s => (
+                        <button
+                            key={s}
+                            onClick={() => onRun(s)}
+                            className="text-xs px-2.5 py-1 rounded-full border border-border bg-muted/40 hover:bg-muted hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all whitespace-nowrap shrink-0"
+                        >
+                            {s}
+                        </button>
+                    ))}
+                </div>
+                <div className="flex gap-2">
+                    <textarea
                             ref={textareaRef}
                             value={prompt}
                             onChange={e => setPrompt(e.target.value)}
@@ -1208,7 +1254,6 @@ function ChatArea({
                         )}
                     </div>
                 </div>
-            )}
         </div>
     );
 }
@@ -1262,13 +1307,12 @@ export default function AgentPage() {
     const isMobile = useIsMobile();
 
     const [prompt, setPrompt] = useState("");
-    const [logs, setLogs]     = useState<LogEntry[]>([]);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [running, setRunning]             = useState(false);
     const [agentId, setAgentId]             = useState<string | null>(null);
     const [dockerMissing, setDockerMissing] = useState(false);
     const [historyKey, setHistoryKey]       = useState(0);
     const [openSheet, setOpenSheet]         = useState<Sheet>(null);
-    const [structuredResult, setStructuredResult] = useState<StructuredResult | null>(null);
     const [confirmRequest, setConfirmRequest]     = useState<ConfirmRequest | null>(null);
     const [confirmLoading, setConfirmLoading]     = useState(false);
     const [inputRequest, setInputRequest]         = useState<InputRequest | null>(null);
@@ -1281,28 +1325,52 @@ export default function AgentPage() {
         const socket = getSocket();
         const onLog = (data: { agentId: string; type: LogEntry["type"]; content: string }) => {
             if (currentAgent.current && data.agentId !== currentAgent.current) return;
-            setLogs(prev => [...prev, { type: data.type, content: data.content, ts: Date.now() }]);
+            const sec = logSectionFor(data.type);
+            const entry = { type: data.type, content: data.content };
+            const rawLog: LogEntry = { ...entry, ts: Date.now() };
+            setMessages(prev => {
+                if (prev.length === 0) return prev;
+                const last = prev[prev.length - 1];
+                const idx = last.sections.findIndex(s => s.id === sec.id);
+                const newSections: LogSection[] = idx >= 0
+                    ? last.sections.map((s, i) => i === idx ? { ...s, entries: [...s.entries, entry] } : s)
+                    : [...last.sections, { id: sec.id, title: sec.title, priority: "normal" as const, entries: [entry] }];
+                return [...prev.slice(0, -1), { ...last, sections: newSections, rawLogs: [...last.rawLogs, rawLog] }];
+            });
         };
         const onDone = (data: { agentId: string; success: boolean; summary: string; dockerMissing?: boolean }) => {
             if (currentAgent.current && data.agentId !== currentAgent.current) return;
             setRunning(false);
-            if (data.dockerMissing)  { setDockerMissing(true); }
-            else if (data.success)   { toast.success("Task completed"); setHistoryKey(k => k + 1); }
-            else                     { toast.error("Task ended with errors"); setHistoryKey(k => k + 1); }
+            if (data.dockerMissing) { setDockerMissing(true); }
+            else {
+                if (data.success) toast.success("Task completed");
+                else toast.error("Task ended with errors");
+                setHistoryKey(k => k + 1);
+            }
+            setMessages(prev => {
+                if (prev.length === 0) return prev;
+                const last = prev[prev.length - 1];
+                return [...prev.slice(0, -1), { ...last, done: true, success: data.success }];
+            });
         };
         const onStructured = (data: { agentId: string } & StructuredResult) => {
             if (currentAgent.current && data.agentId !== currentAgent.current) return;
-            setStructuredResult({
-                taskType: data.taskType,
-                intent:   data.intent,
-                success:  data.success,
-                summary:  data.summary,
-                sections: data.sections,
+            setMessages(prev => {
+                if (prev.length === 0) return prev;
+                const last = prev[prev.length - 1];
+                return [...prev.slice(0, -1), {
+                    ...last,
+                    sections: data.sections,
+                    taskType: data.taskType,
+                    intent: data.intent,
+                    summary: data.summary,
+                    success: data.success,
+                }];
             });
         };
-        const onConfirmRequired = (data: { agentId: string; title: string; message: string }) => {
+        const onConfirmRequired = (data: { agentId: string; title: string; message: string; showNewPortOption?: boolean }) => {
             if (currentAgent.current && data.agentId !== currentAgent.current) return;
-            setConfirmRequest({ agentId: data.agentId, title: data.title, message: data.message });
+            setConfirmRequest({ agentId: data.agentId, title: data.title, message: data.message, showNewPortOption: data.showNewPortOption });
         };
         const onInputRequired = (data: InputRequest) => {
             if (currentAgent.current && data.agentId !== currentAgent.current) return;
@@ -1325,10 +1393,14 @@ export default function AgentPage() {
     const run = useCallback(async (text?: string) => {
         const msg = (text ?? prompt).trim();
         if (!msg || running) return;
-        setLogs([]); setRunning(true); setDockerMissing(false); setPrompt(""); setStructuredResult(null);
+        setRunning(true); setDockerMissing(false); setPrompt("");
+        setOpenSheet(null);
         const id = `ag_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         currentAgent.current = id; setAgentId(id);
-        setOpenSheet(null);
+        setMessages(prev => [...prev, {
+            id, userText: msg, sections: [], done: false,
+            success: false, taskType: "general", intent: msg, summary: "", rawLogs: [],
+        }]);
         try {
             const res = await apiFetch<any>("/agent/run", { method: "POST", body: JSON.stringify({ message: msg, agentId: id }) });
             if (res.dockerMissing) { setDockerMissing(true); setRunning(false); }
@@ -1342,9 +1414,13 @@ export default function AgentPage() {
     }, [agentId]);
 
     const installDocker = useCallback(async () => {
-        setDockerMissing(false); setRunning(true); setLogs([]);
+        setDockerMissing(false); setRunning(true);
         const id = `ag_docker_${Date.now()}`;
         currentAgent.current = id; setAgentId(id);
+        setMessages(prev => [...prev, {
+            id, userText: "Install Docker automatically", sections: [], done: false,
+            success: false, taskType: "infrastructure", intent: "Install Docker automatically", summary: "", rawLogs: [],
+        }]);
         await apiFetch("/agent/install-docker", { method: "POST", body: JSON.stringify({ agentId: id }) });
     }, []);
 
@@ -1365,12 +1441,6 @@ export default function AgentPage() {
         { id: "history"   as Sheet, label: "History",   icon: <History className="w-5 h-5" /> },
         { id: "knowledge" as Sheet, label: "Knowledge", icon: <BookOpen className="w-5 h-5" /> },
     ];
-
-    const clearResult = useCallback(() => {
-        setStructuredResult(null);
-        setLogs([]);
-        setTimeout(() => textareaRef.current?.focus(), 50);
-    }, []);
 
     const sendConfirm = useCallback(async (confirmed: boolean | 'new_port') => {
         if (!confirmRequest) return;
@@ -1413,10 +1483,9 @@ export default function AgentPage() {
     }, [inputRequest]);
 
     const chatProps = {
-        logs, running, dockerMissing, onInstallDocker: installDocker,
+        messages, running, dockerMissing, onInstallDocker: installDocker,
         prompt, setPrompt, onRun: run, onCancel: cancel,
         textareaRef, isMobile: !!isMobile,
-        structuredResult, onClearResult: clearResult,
     };
 
     return (
