@@ -6,9 +6,6 @@ const router = express.Router();
 router.use(authenticateToken);
 
 router.get('/status', async (_req, res) => {
-    if (!process.env.REDIS_URL) {
-        return res.json({ connected: false, reason: 'REDIS_URL not configured' });
-    }
     if (!redisReady()) {
         return res.json({ connected: false, reason: getLastError() || 'Connecting…' });
     }
