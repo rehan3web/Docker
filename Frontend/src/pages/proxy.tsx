@@ -28,7 +28,7 @@ export default function ProxyPage() {
 
   const { data: deplData } = useGetDeployments();
   const railpackDeploys = (deplData?.deployments ?? []).filter(
-    d => d.status === "running" && d.containerName
+    d => (d.status === "success" || d.status === "running") && d.containerName
   );
 
   const [baseDomainId, setBaseDomainId] = useState<number | "">("");
