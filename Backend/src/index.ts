@@ -26,6 +26,7 @@ import { setIo } from './lib/socket';
 import { initScheduler } from './lib/schedulerService';
 import { getInfraConnection } from './lib/infraDb';
 import { initRedis, trackSession } from './lib/redis';
+import { initBuildQueue } from './lib/buildQueue';
 
 dotenv.config();
 
@@ -155,5 +156,6 @@ server.listen(Number(PORT), '0.0.0.0', () => {
         .then(() => console.log('[InfraDB] Connected to dockelt_data'))
         .catch(err => console.error('[InfraDB] Init error:', err.message));
     initScheduler();
+    initBuildQueue();
     initContainerManagement().catch(err => console.error('[ContainerMgmt] Init failed:', err.message));
 });

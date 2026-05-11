@@ -636,7 +636,9 @@ export type DeploySummary = {
   id: string;
   repo: string;
   name: string;
-  status: "pending" | "cloning" | "building" | "running" | "failed" | "success";
+  status: "queued" | "pending" | "cloning" | "building" | "running" | "failed" | "success";
+  buildMethod?: "docker" | "railpack";
+  queuePosition?: number;
   startedAt: number;
   finishedAt?: number;
   error?: string;
@@ -662,6 +664,10 @@ export async function startGithubDeploy(repo: string): Promise<{ id: string; nam
 
 export async function getDeployment(id: string): Promise<any> {
   return apiFetch(`/deploy/${id}`);
+}
+
+export async function getDeploymentLogs(id: string): Promise<{ logs: any[] }> {
+  return apiFetch(`/deploy/${id}/logs`);
 }
 
 // ── Reverse Proxy Manager ─────────────────────────────────────────────────────
