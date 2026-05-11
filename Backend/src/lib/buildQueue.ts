@@ -121,11 +121,21 @@ function runStreamed(id: string, command: string, args: string[], cwd: string): 
     });
 }
 
-// ── RailPack auto-install ─────────────────────────────────────────────────────
+// ── RailPack + mise auto-install ──────────────────────────────────────────────
+// railpack v0.23.0 downloads mise v2026.3.17 to /tmp/railpack/mise/mise-2026.3.17
+// at build time. If that download fails on the VPS (network/permissions) the
+// build errors. We pre-seed the file every backend startup so railpack always
+// finds it without needing to download it itself.
 
-const RAILPACK_VERSION = 'v0.23.0';
-const RAILPACK_URL     = `https://github.com/railwayapp/railpack/releases/download/${RAILPACK_VERSION}/railpack-${RAILPACK_VERSION}-x86_64-unknown-linux-musl.tar.gz`;
-const RAILPACK_INSTALL = path.join(process.env.HOME || '/home/runner', '.local', 'bin');
+const RAILPACK_VERSION  = 'v0.23.0';
+const RAILPACK_URL      = `https://github.com/railwayapp/railpack/releases/download/${RAILPACK_VERSION}/railpack-${RAILPACK_VERSION}-x86_64-unknown-linux-musl.tar.gz`;
+const RAILPACK_INSTALL  = path.join(process.env.HOME || '/home/runner', '.local', 'bin');
+
+// Exact mise version railpack v0.23.0 expects and the path it looks for it at
+const MISE_VERSION      = '2026.3.17';
+const MISE_URL          = `https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64`;
+const MISE_RAILPACK_DIR = '/tmp/railpack/mise';
+const MISE_RAILPACK_BIN = path.join(MISE_RAILPACK_DIR, `mise-${MISE_VERSION}`);
 
 function railpackInPath(): boolean {
     try { execSync('railpack --version', { stdio: 'ignore', env: process.env }); return true; } catch { return false; }
@@ -147,7 +157,36 @@ function downloadFile(url: string, dest: string): Promise<void> {
     });
 }
 
+// Pre-seed mise at the exact path railpack expects — runs every startup
+// since /tmp is ephemeral and gets wiped on reboots/container restarts.
+async function ensureMise(): Promise<void> {
+    if (fs.existsSync(MISE_RAILPACK_BIN)) {
+        console.log(`[BuildQueue] mise ${MISE_VERSION} already seeded`);
+        return;
+    }
+    console.log(`[BuildQueue] seeding mise ${MISE_VERSION} for railpack...`);
+    try {
+        // /tmp/railpack might exist as a file (e.g. a previously extracted binary).
+        // Remove it so we can create the directory tree.
+        const rpTmp = '/tmp/railpack';
+        try {
+            const st = fs.statSync(rpTmp);
+            if (!st.isDirectory()) fs.unlinkSync(rpTmp);
+        } catch { /* doesn't exist — fine */ }
+
+        fs.mkdirSync(MISE_RAILPACK_DIR, { recursive: true });
+        await downloadFile(MISE_URL, MISE_RAILPACK_BIN);
+        fs.chmodSync(MISE_RAILPACK_BIN, 0o755);
+        console.log(`[BuildQueue] mise ${MISE_VERSION} seeded at ${MISE_RAILPACK_BIN}`);
+    } catch (err: any) {
+        console.warn(`[BuildQueue] mise seed failed: ${err.message}`);
+    }
+}
+
 async function ensureRailpack(): Promise<void> {
+    // Always ensure mise is seeded (idempotent — skips if already present)
+    await ensureMise();
+
     if (railpackInPath()) {
         console.log('[BuildQueue] railpack already installed');
         return;
@@ -161,11 +200,9 @@ async function ensureRailpack(): Promise<void> {
         fs.unlinkSync(tarPath);
         fs.chmodSync(path.join(RAILPACK_INSTALL, 'railpack'), 0o755);
 
-        // Ensure the install dir is in process.env.PATH for all future spawns
+        // Ensure install dir is in process.env.PATH for all future spawns
         const cur = process.env.PATH || '';
-        if (!cur.includes(RAILPACK_INSTALL)) {
-            process.env.PATH = `${RAILPACK_INSTALL}:${cur}`;
-        }
+        if (!cur.includes(RAILPACK_INSTALL)) process.env.PATH = `${RAILPACK_INSTALL}:${cur}`;
 
         if (railpackInPath()) {
             console.log(`[BuildQueue] railpack ${RAILPACK_VERSION} installed successfully`);
