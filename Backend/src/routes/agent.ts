@@ -707,17 +707,28 @@ const DB_INPUT_SPECS: Record<string, DbSpec> = {
 /** Detect if the user message is asking to install/setup a specific database */
 function detectDbSetup(message: string): string | null {
     const l = message.toLowerCase();
-    // "set up" (two words), "setup", "install", "deploy", "run", "start", "spin up", "create", "init", "new", "add", "configure"
-    const isSetupIntent = /install|set[\s_-]?up|setup|create|deploy|run|start|spin[\s-]?up|add|configure|init|new|fresh/.test(l);
+
+    // ── Hard block: inspection / query phrases — user is checking, not installing ──
+    // Match any of these patterns → definitely not a setup request.
+    const isInspection = /\bcheck\b|\bwhat\b|\bwhich\b|\bwho\b|\bwhere\b|\bhow\b|\bshow\b|\blist\b|\bstatus\b|\binspect\b|\bmonitor\b|\blogs?\b|\bport\s+(is|of|for|number)\b|\bfind\s+(out?\s+)?(the\s+)?port|\bsee\s+(what|the)\b|\bview\b|\bis\s+\w+\s+running\b|\balready\s+running\b|\bcurrently\s+running\b|\brunning\s+on\s+port\b|\bwhat\s+port\b|\bwhich\s+port\b/.test(l);
+
+    // ── Strong install verbs — unambiguous create/install intent ──
+    const hasStrongInstall = /\binstall\b|\bset[\s_-]?up\b|\bsetup\b|\bcreate\b|\bdeploy\b|\bspin[\s-]?up\b|\bconfigure\b|\binit(ialize)?\b|\bfresh\b|\badd\b/.test(l);
+
+    // ── Weak install verbs — only count when no inspection keyword is present ──
+    const hasWeakInstall = /\bnew\b|\brun\b|\bstart\b/.test(l);
+
+    const isSetupIntent = hasStrongInstall || (hasWeakInstall && !isInspection);
     if (!isSetupIntent) return null;
-    if (/postgres(ql)?|pgsql|pg\b/.test(l))  return 'postgres';
-    if (/\bmysql\b/.test(l))                 return 'mysql';
-    if (/mariadb/.test(l))                   return 'mariadb';
-    if (/mongo(db)?/.test(l))                return 'mongodb';
-    if (/\bredis\b/.test(l))                 return 'redis';
-    if (/elastic(search)?/.test(l))          return 'elasticsearch';
-    if (/cassandra/.test(l))                 return 'cassandra';
-    if (/minio|mino\b/.test(l))              return 'minio';
+
+    if (/postgres(ql)?|pgsql|\bpg\b/.test(l)) return 'postgres';
+    if (/\bmysql\b/.test(l))                   return 'mysql';
+    if (/mariadb/.test(l))                     return 'mariadb';
+    if (/mongo(db)?/.test(l))                  return 'mongodb';
+    if (/\bredis\b/.test(l))                   return 'redis';
+    if (/elastic(search)?/.test(l))            return 'elasticsearch';
+    if (/cassandra/.test(l))                   return 'cassandra';
+    if (/minio|mino\b/.test(l))               return 'minio';
     return null;
 }
 
