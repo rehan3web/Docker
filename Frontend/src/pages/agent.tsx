@@ -5,6 +5,9 @@ import {
     BookOpen, History, Database, ChevronDown, ChevronRight,
     Play, Loader2, Copy, Check, Search, Tag, Package,
     Trash2, X, Zap, Sun, Moon, Container, PlugZap,
+    Layers, FileText, Network, HardDrive, Wrench, Lightbulb,
+    ShieldAlert, ListChecks, Eye, EyeOff, Rocket, Activity,
+    Cpu, Server, Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +26,21 @@ interface LogEntry {
     type: "thinking" | "info" | "command" | "output" | "success" | "error" | "ai" | "verify" | "retry" | "docker_missing";
     content: string;
     ts: number;
+}
+
+interface LogSection {
+    id: string;
+    title: string;
+    priority: "critical" | "high" | "normal" | "low";
+    entries: { type: string; content: string }[];
+}
+
+interface StructuredResult {
+    taskType: string;
+    intent: string;
+    success: boolean;
+    summary: string;
+    sections: LogSection[];
 }
 
 interface AgentTask {
@@ -606,6 +624,185 @@ function BottomSheet({ open, title, icon, onClose, children }: {
     );
 }
 
+// ── Structured result view ────────────────────────────────────────────────────
+
+const TASK_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
+    deployment:     { icon: <Rocket className="w-4 h-4" />,   label: "Deployment",     color: "text-blue-400 bg-blue-400/10 border-blue-400/30" },
+    docker:         { icon: <Container className="w-4 h-4" />, label: "Docker",         color: "text-cyan-400 bg-cyan-400/10 border-cyan-400/30" },
+    debugging:      { icon: <Activity className="w-4 h-4" />, label: "Debugging",      color: "text-orange-400 bg-orange-400/10 border-orange-400/30" },
+    monitoring:     { icon: <Cpu className="w-4 h-4" />,      label: "Monitoring",     color: "text-violet-400 bg-violet-400/10 border-violet-400/30" },
+    database:       { icon: <Database className="w-4 h-4" />, label: "Database",       color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30" },
+    networking:     { icon: <Globe className="w-4 h-4" />,    label: "Networking",     color: "text-sky-400 bg-sky-400/10 border-sky-400/30" },
+    infrastructure: { icon: <Server className="w-4 h-4" />,   label: "Infrastructure", color: "text-amber-400 bg-amber-400/10 border-amber-400/30" },
+    inspection:     { icon: <ListChecks className="w-4 h-4" />, label: "Inspection",   color: "text-primary bg-primary/10 border-primary/30" },
+    general:        { icon: <Bot className="w-4 h-4" />,       label: "Agent",         color: "text-primary bg-primary/10 border-primary/30" },
+};
+
+const SECTION_CONFIG: Record<string, { icon: React.ReactNode; border: string; bg: string; badge: string; defaultOpen: boolean }> = {
+    errors:          { icon: <ShieldAlert className="w-3.5 h-3.5" />,  border: "border-destructive/40", bg: "bg-destructive/5", badge: "bg-destructive/10 text-destructive border-destructive/30", defaultOpen: true },
+    warnings:        { icon: <AlertTriangle className="w-3.5 h-3.5" />, border: "border-amber-500/40",  bg: "bg-amber-500/5",   badge: "bg-amber-500/10 text-amber-500 border-amber-500/30",   defaultOpen: true },
+    results:         { icon: <CheckCircle className="w-3.5 h-3.5" />,  border: "border-primary/30",    bg: "bg-primary/5",     badge: "bg-primary/10 text-primary border-primary/20",          defaultOpen: true },
+    summary:         { icon: <Bot className="w-3.5 h-3.5" />,          border: "border-border",        bg: "bg-muted/20",      badge: "bg-muted text-muted-foreground border-border",           defaultOpen: true },
+    fixes:           { icon: <Wrench className="w-3.5 h-3.5" />,       border: "border-border",        bg: "bg-muted/10",      badge: "bg-muted text-muted-foreground border-border",           defaultOpen: false },
+    recommendations: { icon: <Lightbulb className="w-3.5 h-3.5" />,   border: "border-border",        bg: "bg-muted/10",      badge: "bg-muted text-muted-foreground border-border",           defaultOpen: false },
+    execution:       { icon: <Terminal className="w-3.5 h-3.5" />,     border: "border-border/50",     bg: "bg-muted/5",       badge: "bg-muted/60 text-muted-foreground border-border",        defaultOpen: false },
+};
+
+function SectionEntry({ type, content }: { type: string; content: string }) {
+    const containers = parseContainerBlock(content);
+    if (containers) return <ContainerListCard containers={containers} />;
+
+    switch (type) {
+        case "command":
+            return (
+                <div className="my-1 bg-muted/40 border border-border rounded-md px-3 py-1.5 font-mono text-xs text-foreground break-all">
+                    $ {content}
+                </div>
+            );
+        case "output":
+            return (
+                <div className="font-mono text-[11px] text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                    {content}
+                </div>
+            );
+        case "success":
+            return (
+                <div className="flex items-start gap-2 text-primary py-0.5">
+                    <CheckCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span className="text-sm">{content}</span>
+                </div>
+            );
+        case "error":
+            return (
+                <div className="flex items-start gap-2 text-destructive py-0.5">
+                    <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span className="text-sm font-mono whitespace-pre-wrap">{content}</span>
+                </div>
+            );
+        case "retry":
+            return (
+                <div className="flex items-center gap-2 py-0.5">
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span className="text-sm text-amber-500">{content}</span>
+                </div>
+            );
+        case "ai":
+        default:
+            return (
+                <p className="text-sm text-foreground/90 leading-relaxed py-0.5">{content}</p>
+            );
+    }
+}
+
+function ResultSection({ section }: { section: LogSection }) {
+    const cfg = SECTION_CONFIG[section.id] ?? SECTION_CONFIG.summary;
+    const [open, setOpen] = useState(cfg.defaultOpen);
+
+    return (
+        <div className={cn("rounded-lg border overflow-hidden", cfg.border)}>
+            {/* Section header */}
+            <button
+                onClick={() => setOpen(v => !v)}
+                className={cn("w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-muted/30", cfg.bg)}
+            >
+                <span className={cn("shrink-0", section.id === "errors" ? "text-destructive" : section.id === "warnings" ? "text-amber-500" : section.id === "results" ? "text-primary" : "text-muted-foreground")}>
+                    {cfg.icon}
+                </span>
+                <span className="text-sm font-medium flex-1">{section.title}</span>
+                <span className={cn("text-[10px] font-medium px-1.5 py-0.5 rounded-full border", cfg.badge)}>
+                    {section.entries.length}
+                </span>
+                <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", open && "rotate-180")} />
+            </button>
+
+            {/* Section content */}
+            {open && (
+                <div className={cn("px-3 py-3 space-y-1.5 border-t", cfg.border, "border-opacity-50")}>
+                    {section.entries.map((e, i) => (
+                        <SectionEntry key={i} type={e.type} content={e.content} />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function StructuredResultView({
+    result,
+    rawLogs,
+    onNewTask,
+}: {
+    result: StructuredResult;
+    rawLogs: LogEntry[];
+    onNewTask: () => void;
+}) {
+    const [showRaw, setShowRaw] = useState(false);
+    const taskCfg = TASK_TYPE_CONFIG[result.taskType] ?? TASK_TYPE_CONFIG.general;
+
+    return (
+        <div className="flex flex-col h-full overflow-y-auto">
+            <div className="p-4 space-y-3">
+                {/* Task type + status banner */}
+                <div className={cn("rounded-xl border p-4", result.success ? "border-primary/30 bg-primary/5" : "border-destructive/30 bg-destructive/5")}>
+                    <div className="flex items-start gap-3">
+                        <div className={cn("p-2 rounded-lg border shrink-0", taskCfg.color)}>
+                            {taskCfg.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant="outline" className={cn("text-[10px] font-semibold px-2 py-0 rounded-full uppercase tracking-wider", taskCfg.color)}>
+                                    {taskCfg.label}
+                                </Badge>
+                                {result.success ? (
+                                    <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full bg-primary/10 text-primary border-primary/20">
+                                        ✓ Completed
+                                    </Badge>
+                                ) : (
+                                    <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full bg-destructive/10 text-destructive border-destructive/30">
+                                        ✗ Failed
+                                    </Badge>
+                                )}
+                            </div>
+                            <p className="text-sm font-medium text-foreground mt-1.5 leading-snug">{result.intent}</p>
+                            {result.summary && result.summary !== result.intent && (
+                                <p className="text-xs text-muted-foreground mt-1">{result.summary}</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Sections */}
+                {result.sections.map(s => (
+                    <ResultSection key={s.id} section={s} />
+                ))}
+
+                {/* Raw log toggle */}
+                <div className="rounded-lg border border-border/50 overflow-hidden">
+                    <button
+                        onClick={() => setShowRaw(v => !v)}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+                    >
+                        <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-xs font-medium text-muted-foreground flex-1">Raw Execution Log</span>
+                        <span className="text-[10px] text-muted-foreground">{rawLogs.length} lines</span>
+                        {showRaw ? <EyeOff className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <Eye className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+                    </button>
+                    {showRaw && (
+                        <div className="border-t border-border/50 p-3 space-y-0.5 max-h-80 overflow-y-auto bg-background">
+                            {rawLogs.map((entry, i) => <LogLine key={i} entry={entry} />)}
+                        </div>
+                    )}
+                </div>
+
+                {/* New task button */}
+                <Button variant="outline" className="w-full gap-2 h-9" onClick={onNewTask}>
+                    <Send className="w-3.5 h-3.5" />New Task
+                </Button>
+            </div>
+        </div>
+    );
+}
+
 // ── Suggestions ───────────────────────────────────────────────────────────────
 
 const SUGGESTIONS = [
@@ -625,121 +822,147 @@ const SUGGESTIONS = [
 function ChatArea({
     logs, running, dockerMissing, onInstallDocker,
     prompt, setPrompt, onRun, onCancel, textareaRef, isMobile,
+    structuredResult, onClearResult,
 }: {
     logs: LogEntry[]; running: boolean; dockerMissing: boolean;
     onInstallDocker: () => void; prompt: string; setPrompt: (v: string) => void;
     onRun: (text?: string) => void; onCancel: () => void;
     textareaRef: React.RefObject<HTMLTextAreaElement>; isMobile: boolean;
+    structuredResult: StructuredResult | null;
+    onClearResult: () => void;
 }) {
     const logEndRef = useRef<HTMLDivElement>(null);
     useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
 
+    // Show structured result if available and not actively running
+    const showStructured = !!structuredResult && !running;
+
     return (
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
-            {/* Log area */}
-            <div className="flex-1 overflow-y-auto min-h-0">
-                {/* Terminal header bar */}
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between sticky top-0 z-10">
+            {/* Output area — live log OR structured result */}
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+
+                {/* Header bar */}
+                <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between shrink-0">
                     <div className="flex items-center gap-2">
                         <div className="flex gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-border" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-border" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-border" />
+                            <span className="w-2 h-2 rounded-full bg-border" />
+                            <span className="w-2 h-2 rounded-full bg-border" />
+                            <span className="w-2 h-2 rounded-full bg-border" />
                         </div>
                         <Terminal className="w-3.5 h-3.5 text-muted-foreground ml-1" />
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Agent Output</span>
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                            {showStructured ? "Result" : "Live Output"}
+                        </span>
                     </div>
-                    {running && (
-                        <div className="flex items-center gap-1.5">
-                            <span className="relative flex h-2 w-2">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                            </span>
-                            <span className="text-[10px] text-primary font-medium">Running</span>
-                        </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                        {running && (
+                            <div className="flex items-center gap-1.5">
+                                <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                                </span>
+                                <span className="text-[10px] text-primary font-medium">Running</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                <div className="p-4 space-y-0.5">
-                    {logs.length === 0 && !running && (
-                        <div className="flex flex-col items-center justify-center gap-6 text-center py-12 px-4">
-                            <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20">
-                                <Bot className="w-8 h-8 text-primary" />
-                            </div>
-                            <div>
-                                <h2 className="text-2xl font-normal tracking-tight text-foreground">DevOps Agent</h2>
-                                <p className="text-sm text-muted-foreground mt-2 max-w-xs leading-relaxed">
-                                    Describe any Docker task in plain English. The agent searches DockerHub live,
-                                    plans steps, executes, verifies, and self-heals on failure.
-                                </p>
-                            </div>
-                            <div className={cn("grid gap-2 w-full max-w-sm", isMobile ? "grid-cols-2" : "grid-cols-1")}>
-                                {SUGGESTIONS.slice(0, isMobile ? 6 : 5).map(s => (
-                                    <button
-                                        key={s}
-                                        onClick={() => onRun(s)}
-                                        className="text-xs text-left px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted/50 hover:border-primary/30 transition-all text-muted-foreground hover:text-foreground"
-                                    >
-                                        {s}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {logs.map((entry, i) => <LogLine key={i} entry={entry} />)}
-
-                    {dockerMissing && (
-                        <div className="mt-4 p-4 rounded-lg border border-amber-500/30 bg-amber-500/5">
-                            <p className="text-sm font-semibold text-amber-500 flex items-center gap-2">
-                                <AlertTriangle className="w-4 h-4" />Docker Not Available
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-1 mb-3">Docker is not installed or not running on this host.</p>
-                            <Button variant="outline" className="h-8 text-xs border-amber-500/40 text-amber-500 hover:bg-amber-500/10 gap-2" onClick={onInstallDocker}>
-                                <Zap className="w-3.5 h-3.5" />Install Docker Automatically
-                            </Button>
-                        </div>
-                    )}
-                    <div ref={logEndRef} />
-                </div>
-            </div>
-
-            {/* Prompt bar */}
-            <div className="border-t border-border px-4 py-3 bg-background space-y-2 shrink-0">
-                {/* Scrollable quick chips */}
-                <div className="flex gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
-                    {SUGGESTIONS.map(s => (
-                        <button
-                            key={s}
-                            onClick={() => onRun(s)}
-                            className="text-xs px-2.5 py-1 rounded-full border border-border bg-muted/40 hover:bg-muted hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all whitespace-nowrap shrink-0"
-                        >
-                            {s}
-                        </button>
-                    ))}
-                </div>
-                <div className="flex gap-2">
-                    <textarea
-                        ref={textareaRef}
-                        value={prompt}
-                        onChange={e => setPrompt(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onRun(); } }}
-                        placeholder="Describe a Docker task… (Enter to run, Shift+Enter for newline)"
-                        rows={2}
-                        className="flex-1 resize-none text-sm rounded-lg border border-border bg-muted/30 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground font-sans"
-                        disabled={running}
+                {/* Structured result view */}
+                {showStructured && (
+                    <StructuredResultView
+                        result={structuredResult}
+                        rawLogs={logs}
+                        onNewTask={onClearResult}
                     />
-                    {running ? (
-                        <Button variant="destructive" size="icon" className="h-auto w-10 shrink-0 rounded-lg" onClick={onCancel}>
-                            <Square className="w-4 h-4" />
-                        </Button>
-                    ) : (
-                        <Button size="icon" className="h-auto w-10 shrink-0 rounded-lg" onClick={() => onRun()} disabled={!prompt.trim()}>
-                            <Send className="w-4 h-4" />
-                        </Button>
-                    )}
-                </div>
+                )}
+
+                {/* Live log view — shown while running or when no result yet */}
+                {!showStructured && (
+                    <div className="flex-1 overflow-y-auto min-h-0">
+                        <div className="p-4 space-y-0.5">
+                            {logs.length === 0 && !running && (
+                                <div className="flex flex-col items-center justify-center gap-6 text-center py-12 px-4">
+                                    <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20">
+                                        <Bot className="w-8 h-8 text-primary" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-normal tracking-tight text-foreground">DevOps Agent</h2>
+                                        <p className="text-sm text-muted-foreground mt-2 max-w-xs leading-relaxed">
+                                            Describe any Docker task in plain English. The agent searches DockerHub live,
+                                            plans steps, executes, verifies, and self-heals on failure.
+                                        </p>
+                                    </div>
+                                    <div className={cn("grid gap-2 w-full max-w-sm", isMobile ? "grid-cols-2" : "grid-cols-1")}>
+                                        {SUGGESTIONS.slice(0, isMobile ? 6 : 5).map(s => (
+                                            <button
+                                                key={s}
+                                                onClick={() => onRun(s)}
+                                                className="text-xs text-left px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted/50 hover:border-primary/30 transition-all text-muted-foreground hover:text-foreground"
+                                            >
+                                                {s}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {logs.map((entry, i) => <LogLine key={i} entry={entry} />)}
+
+                            {dockerMissing && (
+                                <div className="mt-4 p-4 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                                    <p className="text-sm font-semibold text-amber-500 flex items-center gap-2">
+                                        <AlertTriangle className="w-4 h-4" />Docker Not Available
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-1 mb-3">Docker is not installed or not running on this host.</p>
+                                    <Button variant="outline" className="h-8 text-xs border-amber-500/40 text-amber-500 hover:bg-amber-500/10 gap-2" onClick={onInstallDocker}>
+                                        <Zap className="w-3.5 h-3.5" />Install Docker Automatically
+                                    </Button>
+                                </div>
+                            )}
+                            <div ref={logEndRef} />
+                        </div>
+                    </div>
+                )}
             </div>
+
+            {/* Prompt bar — hidden when showing structured result (use "New Task" button instead) */}
+            {!showStructured && (
+                <div className="border-t border-border px-4 py-3 bg-background space-y-2 shrink-0">
+                    <div className="flex gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+                        {SUGGESTIONS.map(s => (
+                            <button
+                                key={s}
+                                onClick={() => onRun(s)}
+                                className="text-xs px-2.5 py-1 rounded-full border border-border bg-muted/40 hover:bg-muted hover:border-primary/30 text-muted-foreground hover:text-foreground transition-all whitespace-nowrap shrink-0"
+                            >
+                                {s}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex gap-2">
+                        <textarea
+                            ref={textareaRef}
+                            value={prompt}
+                            onChange={e => setPrompt(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onRun(); } }}
+                            placeholder="Describe a Docker task… (Enter to run, Shift+Enter for newline)"
+                            rows={2}
+                            className="flex-1 resize-none text-sm rounded-lg border border-border bg-muted/30 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground font-sans"
+                            disabled={running}
+                        />
+                        {running ? (
+                            <Button variant="destructive" size="icon" className="h-auto w-10 shrink-0 rounded-lg" onClick={onCancel}>
+                                <Square className="w-4 h-4" />
+                            </Button>
+                        ) : (
+                            <Button size="icon" className="h-auto w-10 shrink-0 rounded-lg" onClick={() => onRun()} disabled={!prompt.trim()}>
+                                <Send className="w-4 h-4" />
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -794,11 +1017,12 @@ export default function AgentPage() {
 
     const [prompt, setPrompt] = useState("");
     const [logs, setLogs]     = useState<LogEntry[]>([]);
-    const [running, setRunning]       = useState(false);
-    const [agentId, setAgentId]       = useState<string | null>(null);
+    const [running, setRunning]             = useState(false);
+    const [agentId, setAgentId]             = useState<string | null>(null);
     const [dockerMissing, setDockerMissing] = useState(false);
-    const [historyKey, setHistoryKey] = useState(0);
-    const [openSheet, setOpenSheet]   = useState<Sheet>(null);
+    const [historyKey, setHistoryKey]       = useState(0);
+    const [openSheet, setOpenSheet]         = useState<Sheet>(null);
+    const [structuredResult, setStructuredResult] = useState<StructuredResult | null>(null);
 
     const textareaRef  = useRef<HTMLTextAreaElement>(null);
     const currentAgent = useRef<string | null>(null);
@@ -816,15 +1040,30 @@ export default function AgentPage() {
             else if (data.success)   { toast.success("Task completed"); setHistoryKey(k => k + 1); }
             else                     { toast.error("Task ended with errors"); setHistoryKey(k => k + 1); }
         };
+        const onStructured = (data: { agentId: string } & StructuredResult) => {
+            if (currentAgent.current && data.agentId !== currentAgent.current) return;
+            setStructuredResult({
+                taskType: data.taskType,
+                intent:   data.intent,
+                success:  data.success,
+                summary:  data.summary,
+                sections: data.sections,
+            });
+        };
         socket.on("agent:log", onLog);
         socket.on("agent:done", onDone);
-        return () => { socket.off("agent:log", onLog); socket.off("agent:done", onDone); };
+        socket.on("agent:structured_result", onStructured);
+        return () => {
+            socket.off("agent:log", onLog);
+            socket.off("agent:done", onDone);
+            socket.off("agent:structured_result", onStructured);
+        };
     }, []);
 
     const run = useCallback(async (text?: string) => {
         const msg = (text ?? prompt).trim();
         if (!msg || running) return;
-        setLogs([]); setRunning(true); setDockerMissing(false); setPrompt("");
+        setLogs([]); setRunning(true); setDockerMissing(false); setPrompt(""); setStructuredResult(null);
         const id = `ag_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         currentAgent.current = id; setAgentId(id);
         setOpenSheet(null);
@@ -865,10 +1104,17 @@ export default function AgentPage() {
         { id: "knowledge" as Sheet, label: "Knowledge", icon: <BookOpen className="w-5 h-5" /> },
     ];
 
+    const clearResult = useCallback(() => {
+        setStructuredResult(null);
+        setLogs([]);
+        setTimeout(() => textareaRef.current?.focus(), 50);
+    }, []);
+
     const chatProps = {
         logs, running, dockerMissing, onInstallDocker: installDocker,
         prompt, setPrompt, onRun: run, onCancel: cancel,
         textareaRef, isMobile: !!isMobile,
+        structuredResult, onClearResult: clearResult,
     };
 
     return (

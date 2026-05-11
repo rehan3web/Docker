@@ -1302,6 +1302,101 @@ function getServiceRecipePlan(message: string): ServiceRecipe | null {
     return null;
 }
 
+// ── Structured result classifier ─────────────────────────────────────────────
+
+function detectTaskType(intent: string): string {
+    const l = intent.toLowerCase();
+    if (/deploy|install|pull|image|build|compose/.test(l)) return 'deployment';
+    if (/stop|start|restart|remove|kill/.test(l))          return 'docker';
+    if (/debug|log|trace|crash|diagnos/.test(l))           return 'debugging';
+    if (/monitor|stat|metric|cpu|memory|disk/.test(l))     return 'monitoring';
+    if (/postgres|mysql|mongo|redis|elastic|database|db/.test(l)) return 'database';
+    if (/network|proxy|domain|ssl|nginx|traefik|port|http/.test(l)) return 'networking';
+    if (/backup|restore|export|import/.test(l))            return 'infrastructure';
+    if (/check|list|show|status|running|container/.test(l)) return 'inspection';
+    return 'general';
+}
+
+interface LogSection {
+    id: string;
+    title: string;
+    priority: 'critical' | 'high' | 'normal' | 'low';
+    entries: { type: string; content: string }[];
+}
+
+interface StructuredResult {
+    taskType: string;
+    intent: string;
+    success: boolean;
+    summary: string;
+    sections: LogSection[];
+}
+
+function classifyLogs(intent: string, rawLines: string[], success: boolean, summary: string): StructuredResult {
+    const taskType = detectTaskType(intent);
+
+    const summaryE: { type: string; content: string }[] = [];
+    const execE:    { type: string; content: string }[] = [];
+    const resultE:  { type: string; content: string }[] = [];
+    const warnE:    { type: string; content: string }[] = [];
+    const errorE:   { type: string; content: string }[] = [];
+    const fixE:     { type: string; content: string }[] = [];
+    const recE:     { type: string; content: string }[] = [];
+
+    for (const raw of rawLines) {
+        const m = raw.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
+        const type    = m ? m[1] : 'output';
+        const content = (m ? m[2] : raw).trim();
+        if (!content) continue;
+
+        const lc = content.toLowerCase();
+
+        switch (type) {
+            case 'ai':
+                if (lc.includes('✓') || lc.includes('success') || lc.includes('complete') || lc.includes('done'))
+                    resultE.push({ type, content });
+                else if (lc.includes('recommend') || lc.includes('suggest') || lc.includes('next step') || lc.includes('consider'))
+                    recE.push({ type, content });
+                else
+                    summaryE.push({ type, content });
+                break;
+            case 'success':
+                resultE.push({ type, content }); break;
+            case 'error':
+                errorE.push({ type, content }); break;
+            case 'retry':
+                fixE.push({ type, content }); break;
+            case 'command':
+                execE.push({ type, content }); break;
+            case 'output':
+                if (content.length > 4) execE.push({ type, content }); break;
+            case 'verify':
+                if (lc.includes('fail') || lc.includes('error')) warnE.push({ type, content });
+                else resultE.push({ type, content });
+                break;
+            case 'info':
+                if (lc.includes('fix') || lc.includes('attempt') || lc.includes('retry')) fixE.push({ type, content });
+                else summaryE.push({ type, content });
+                break;
+            case 'thinking':
+                summaryE.push({ type, content }); break;
+            default:
+                summaryE.push({ type, content });
+        }
+    }
+
+    const sections: LogSection[] = [];
+    if (errorE.length)    sections.push({ id: 'errors',          title: 'Errors',         priority: 'critical', entries: errorE });
+    if (warnE.length)     sections.push({ id: 'warnings',        title: 'Warnings',       priority: 'high',     entries: warnE });
+    if (resultE.length)   sections.push({ id: 'results',         title: 'Results',        priority: 'high',     entries: resultE });
+    if (summaryE.length)  sections.push({ id: 'summary',         title: 'Task Summary',   priority: 'high',     entries: summaryE });
+    if (fixE.length)      sections.push({ id: 'fixes',           title: 'Fixes Applied',  priority: 'normal',   entries: fixE });
+    if (recE.length)      sections.push({ id: 'recommendations', title: 'AI Recommendations', priority: 'normal', entries: recE });
+    if (execE.length)     sections.push({ id: 'execution',       title: 'Execution Log',  priority: 'low',      entries: execE });
+
+    return { taskType, intent, success, summary, sections };
+}
+
 // ── Init DB on module load ────────────────────────────────────────────────────
 
 initAgentDb().catch(err => console.warn('[AgentDB] Init warning:', err.message));
@@ -1332,6 +1427,11 @@ async function runAgentLoop(
     async function done(success: boolean, summary: string) {
         await finishTask(agentId, success, summary, allLogLines, retryCount);
         emitToUser(userId, 'agent:done', { agentId, success, summary });
+        // Emit structured result for the organised UI
+        try {
+            const structured = classifyLogs(message, allLogLines, success, summary);
+            emitToUser(userId, 'agent:structured_result', { agentId, ...structured });
+        } catch { /* non-fatal */ }
         // Store knowledge on success
         if (success) {
             const key = message.toLowerCase().replace(/[^a-z0-9 ]/g, '').slice(0, 80);

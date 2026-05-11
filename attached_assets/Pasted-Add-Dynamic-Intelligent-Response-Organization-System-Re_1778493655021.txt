@@ -1,0 +1,104 @@
+Add Dynamic Intelligent Response Organization System.
+
+Requirements:
+
+* dynamically organize all agent responses automatically
+* AI-generated structured summaries
+* adaptive response formatting based on task type
+* professional DevOPS result presentation
+* clean readable output
+* intelligent section grouping
+* auto-priority important information
+* compact readable infrastructure summaries
+
+Agent must dynamically detect:
+
+* deployment task
+* Docker task
+* debugging task
+* infrastructure task
+* monitoring task
+* logs task
+* database task
+* networking task
+
+Then automatically generate best organized response layout.
+
+Do NOT use static/raw terminal dump responses.
+
+Agent must automatically separate:
+
+* summary
+* execution
+* results
+* warnings
+* errors
+* fixes
+* recommendations
+* logs
+
+Dynamic response sections:
+
+```text id="x7l2qa"
+Task Summary
+Infrastructure Status
+Actions Performed
+Affected Containers
+Ports & Networks
+Health Status
+Warnings
+Errors
+Fixes Applied
+AI Recommendations
+Next Actions
+```
+
+Add intelligent prioritization:
+
+* show critical issues first
+* highlight failures
+* compress repetitive logs
+* auto-hide unnecessary verbose output
+* highlight successful fixes
+* summarize long execution chains
+
+Add adaptive UI formatting:
+
+* deployment card layout
+* infrastructure overview
+* grouped Docker services
+* categorized container states
+* health indicators
+* realtime progress sections
+
+Agent must automatically group:
+
+* infrastructure containers
+* applications
+* databases
+* queues/cache
+* networking/proxy
+* build systems
+
+Add dynamic result memory:
+
+* learn preferred response style
+* learn best summarization format
+* improve future response organization automatically
+
+Store separately:
+
+* raw execution logs
+* summarized AI response
+* debugging details
+* recovery actions
+
+Add expandable advanced details mode:
+
+* compact default UI
+* expandable debug logs
+* expandable execution traces
+* expandable reasoning
+
+Goal:
+Create highly organized, dynamic, intelligent, and manageable AI DevOPS responses instead of raw unstructured terminal-style output.
