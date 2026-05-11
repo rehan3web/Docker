@@ -24,6 +24,7 @@ import DomainsPage from "@/pages/domains";
 import AiPage from "@/pages/ai";
 import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
+import TwoFASetupOverlay from "@/components/TwoFASetupOverlay";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { getToken } from "@/api/client";
 
@@ -88,6 +89,7 @@ function App() {
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
             <Router />
+            <TwoFASetupOverlay />
           </WouterRouter>
           <Toaster />
         </TooltipProvider>

@@ -10,7 +10,8 @@ Nextbase is a self-hosted, full-stack PostgreSQL management tool — a lightweig
 - **Database Statistics**: Real-time monitoring of size, connections, throughput, cache hit ratio
 - **Backup & Restore**: pg_dump and pg_restore support via UI
 - **Connection Pooling**: pgBouncer integration
-- **Authentication**: JWT-based admin login
+- **Authentication**: JWT-based admin login with optional Two-Factor Authentication (TOTP)
+- **Two-Factor Authentication (2FA)**: TOTP-based 2FA controlled by `ENABLE_2FA=true/false`. First-time setup overlay after login, QR code + manual key, compatible with Google Authenticator / Authy / 1Password. Login OTP step with 5-min partial token. Change/Disable flows require password confirmation. TOTP secret AES-256-GCM encrypted at rest. OTP rate-limited (10 attempts / 15 min). Settings → 2FA tab.
 - **VPS Management**: Live CPU/RAM/Storage/Load charts streamed via Socket.IO every 3s with 60-point rolling history
 - **AI Terminal**: Shell command runner with NVIDIA LLM integration (user-supplied API key, AES-GCM encrypted at rest), live WS-streamed output, command suggestions, dangerous-command safety guards requiring explicit "I CONFIRM" confirmation
 - **Docker Manager**: Container start/stop/restart/remove + bulk actions via dockerode (gracefully reports unavailable when Docker is not installed)

@@ -67,12 +67,16 @@ export function generateClientCommandId(): string {
   return `c_${rand.slice(0, 14)}`;
 }
 
-export async function login(username: string, password: string): Promise<{ token: string; user: { username: string } }> {
-  const data = await apiFetch<{ token: string; user: { username: string } }>("/auth/login", {
+type LoginResult =
+  | { requiresOTP: true; otpToken: string }
+  | { requiresOTP?: false; token: string; user: { username: string } };
+
+export async function login(username: string, password: string): Promise<LoginResult> {
+  const data = await apiFetch<LoginResult>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-  setToken(data.token);
+  if (!data.requiresOTP) setToken((data as any).token);
   return data;
 }
 
@@ -82,6 +86,53 @@ export async function getMe(): Promise<{ user: { username: string } }> {
 
 export async function getAuthConfig(): Promise<{ username: string }> {
   return apiFetch("/auth/config");
+}
+
+// ── 2FA ───────────────────────────────────────────────────────────────────────
+
+export async function twoFaVerifyLogin(otpToken: string, code: string): Promise<{ token: string; user: { username: string } }> {
+  const data = await apiFetch<{ token: string; user: { username: string } }>("/auth/2fa/verify-login", {
+    method: "POST",
+    body: JSON.stringify({ otpToken, code }),
+  });
+  setToken(data.token);
+  return data;
+}
+
+export async function twoFaStatus(): Promise<{ featureEnabled: boolean; configured: boolean; enabled: boolean }> {
+  return apiFetch("/auth/2fa/status");
+}
+
+export async function twoFaSetup(): Promise<{ secret: string; qrDataUrl: string }> {
+  return apiFetch("/auth/2fa/setup", { method: "POST" });
+}
+
+export async function twoFaEnable(code: string): Promise<{ ok: boolean }> {
+  return apiFetch("/auth/2fa/enable", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+export async function twoFaDisable(password: string): Promise<{ ok: boolean }> {
+  return apiFetch("/auth/2fa/disable", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
+
+export async function twoFaChange(password: string): Promise<{ secret: string; qrDataUrl: string }> {
+  return apiFetch("/auth/2fa/change", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
+
+export async function twoFaChangeConfirm(code: string): Promise<{ ok: boolean }> {
+  return apiFetch("/auth/2fa/change-confirm", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────

@@ -8,7 +8,11 @@ let initialized = false;
  * keys are AES-GCM encrypted before persistence; values read are decrypted
  * transparently. Plaintext legacy rows are migrated on next read.
  */
-const SECRET_KEYS = new Set<string>(['nvidia_api_key']);
+const SECRET_KEYS = new Set<string>([
+    'nvidia_api_key',
+    'twofa_secret',
+    'twofa_pending_secret',
+]);
 
 async function ensureTable() {
     if (initialized) return;

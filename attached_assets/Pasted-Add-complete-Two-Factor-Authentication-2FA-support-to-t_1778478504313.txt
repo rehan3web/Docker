@@ -1,0 +1,239 @@
+Add complete Two-Factor Authentication (2FA) support to the app.
+
+Requirements:
+
+1. Add `.env` configuration:
+
+```env
+ENABLE_2FA=true
+```
+
+Behavior:
+
+* If `ENABLE_2FA=true`
+
+  * 2FA system enabled
+  * Setup flow enabled
+  * Login verification enabled
+  * Settings tab visible
+* If `ENABLE_2FA=false`
+
+  * Entire 2FA system disabled
+  * No OTP verification
+  * No setup screen
+  * Hide 2FA tab
+  * Existing DB values ignored
+
+Backend restart required after `.env` changes.
+
+---
+
+First-Time Setup Flow:
+
+After successful login:
+
+Conditions:
+
+* ENABLE_2FA=true
+* user.twoFactorEnabled=false
+
+Then immediately show a quick setup panel/modal:
+
+# 2FA Setup
+
+Options:
+
+* Setup with QR Code
+* Setup with Manual Key
+
+Generate TOTP secret and QR.
+
+QR format:
+
+```text
+otpauth://totp/AppName:user@email.com?secret=SECRET&issuer=AppName
+```
+
+Show:
+
+* QR Code
+* Manual secret key
+* Copy button
+
+Compatible with:
+
+* Google Authenticator
+* Authy
+* Microsoft Authenticator
+* 1Password
+
+---
+
+Verification Step:
+
+User enters:
+
+```text
+6-digit OTP
+```
+
+Backend verifies token.
+
+If valid:
+
+* save encrypted secret
+* set:
+
+```text
+user.twoFactorEnabled=true
+```
+
+Store in DB.
+
+Show success message:
+
+```text
+2FA Enabled Successfully
+```
+
+---
+
+Database:
+
+Add fields:
+
+```sql
+ALTER TABLE users
+ADD COLUMN two_factor_enabled BOOLEAN DEFAULT false,
+ADD COLUMN two_factor_secret TEXT NULL;
+```
+
+---
+
+Login Flow:
+
+If:
+
+* ENABLE_2FA=true
+* user.twoFactorEnabled=true
+
+Then after password verification:
+
+Show:
+
+# Two-Factor Verification
+
+Input:
+
+* 6-digit OTP
+
+If valid:
+
+* create session
+* issue JWT/cookie
+* complete login
+
+If invalid:
+
+* show invalid code error
+
+---
+
+Forgot 2FA:
+
+Add global reset method similar to SSH reset behavior.
+
+Flow:
+
+1. Change:
+
+```env
+ENABLE_2FA=false
+```
+
+2. Restart backend
+
+Result:
+
+* all users bypass 2FA
+* users can login normally
+* existing secrets ignored
+
+If later:
+
+```env
+ENABLE_2FA=true
+```
+
+Then users without active setup must configure 2FA again.
+
+---
+
+Change 2FA:
+
+Add option:
+
+# Change 2FA
+
+Flow:
+
+* verify existing password
+* generate new secret
+* regenerate QR
+* verify new OTP
+* replace old secret
+
+---
+
+Settings UI:
+
+Current:
+
+```text
+Settings
+Manage your database connections and configuration.
+```
+
+Add new upper tab:
+
+```text
+[ Database ] [ 2FA ]
+```
+
+2FA page states:
+
+If disabled globally:
+
+```text
+Two-Factor Authentication Disabled
+```
+
+If enabled but not configured:
+
+```text
+Setup 2FA
+```
+
+If already enabled:
+
+* 2FA Enabled
+* Regenerate QR
+* Change 2FA
+* Disable 2FA
+
+---
+
+Recommended libraries:
+
+Node.js:
+
+* speakeasy or otplib
+* qrcode
+
+Security:
+
+* encrypt secrets before DB storage
+* add OTP rate limiting
+* add retry protection
+* add audit logs
+* optional backup recovery codes
