@@ -677,6 +677,7 @@ export type ProxyDomain = {
   id: number;
   domain: string;
   target_port: number;
+  target_host: string;
   verified: boolean;
   ssl_enabled: boolean;
   created_at: string;
@@ -695,10 +696,10 @@ export async function getServerIp(): Promise<{ ip: string }> {
   return apiFetch("/proxy/server-ip");
 }
 
-export async function createProxyDomain(domain: string, targetPort: number): Promise<{ domain: ProxyDomain; autoVerified?: boolean }> {
+export async function createProxyDomain(domain: string, targetPort: number, targetHost?: string): Promise<{ domain: ProxyDomain; autoVerified?: boolean }> {
   return apiFetch("/proxy/create", {
     method: "POST",
-    body: JSON.stringify({ domain, targetPort }),
+    body: JSON.stringify({ domain, targetPort, targetHost }),
   });
 }
 

@@ -44,6 +44,11 @@ async function ensureTable() {
             updated_at  TIMESTAMPTZ DEFAULT NOW()
         )
     `);
+    // Add target_host column for container-name routing (railpack deploys)
+    await pool.query(`
+        ALTER TABLE docklet_proxy_domains
+        ADD COLUMN IF NOT EXISTS target_host VARCHAR(255) DEFAULT '127.0.0.1'
+    `);
     dbReady = true;
 }
 
@@ -85,12 +90,10 @@ function safeId(domain: string): string {
 }
 
 // ── Parent-domain wildcard check ──────────────────────────────────────────────
-// If the subdomain's parent (e.g. xrpflow.xyz for app.xrpflow.xyz) is already
-// wildcard-verified in the primary DB, we can skip DNS verification entirely.
 
 async function isParentVerified(domain: string): Promise<boolean> {
     const parts = domain.split('.');
-    if (parts.length < 3) return false; // root domain — must verify normally
+    if (parts.length < 3) return false;
     const parent = parts.slice(1).join('.');
     try {
         const pool = await getConnection();
@@ -105,10 +108,10 @@ async function isParentVerified(domain: string): Promise<boolean> {
 }
 
 // ── Traefik dynamic file-provider config templates ────────────────────────────
-// Traefik watches traefik-configs/ via the file provider and hot-reloads
-// whenever a file is created, updated, or deleted — no manual reload needed.
+// targetHost is either '127.0.0.1' (host-port routing) or a container name
+// (container routing via the docklet-apps Docker network).
 
-function traefikHttpOnly(domain: string, port: number, serverIp: string): string {
+function traefikHttpOnly(domain: string, targetHost: string, port: number): string {
     const id = safeId(domain);
     const rule = domainRule(domain);
     return `# Managed by Docklet — do not edit manually
@@ -124,11 +127,11 @@ http:
     ${id}-svc:
       loadBalancer:
         servers:
-          - url: "http://${serverIp}:${port}"
+          - url: "http://${targetHost}:${port}"
 `;
 }
 
-function traefikHttps(domain: string, port: number, serverIp: string): string {
+function traefikHttps(domain: string, targetHost: string, port: number): string {
     const id = safeId(domain);
     const rule = domainRule(domain);
     return `# Managed by Docklet — do not edit manually
@@ -160,16 +163,15 @@ http:
     ${id}-svc:
       loadBalancer:
         servers:
-          - url: "http://${serverIp}:${port}"
+          - url: "http://${targetHost}:${port}"
 `;
 }
 
-async function writeConfig(domain: string, port: number, ssl: boolean): Promise<void> {
-    const serverIp = await getServerIp();
+async function writeConfig(domain: string, targetHost: string, port: number, ssl: boolean): Promise<void> {
     const configPath = path.join(TRAEFIK_CONFIGS_DIR, `${domain}.yml`);
     fs.writeFileSync(
         configPath,
-        ssl ? traefikHttps(domain, port, serverIp) : traefikHttpOnly(domain, port, serverIp)
+        ssl ? traefikHttps(domain, targetHost, port) : traefikHttpOnly(domain, targetHost, port)
     );
 }
 
@@ -196,7 +198,7 @@ router.get('/list', authenticateToken, async (_req, res) => {
 });
 
 router.post('/create', authenticateToken, async (req, res) => {
-    const { domain, targetPort } = req.body || {};
+    const { domain, targetPort, targetHost: rawHost } = req.body || {};
     if (!domain || typeof domain !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(domain)) {
         return res.status(400).json({ message: 'Valid domain required (e.g. example.com or app.example.com)' });
     }
@@ -204,27 +206,29 @@ router.post('/create', authenticateToken, async (req, res) => {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
         return res.status(400).json({ message: 'Valid port (1–65535) required' });
     }
+    // targetHost defaults to 127.0.0.1 for host-port routes; container name for railpack routes
+    const targetHost: string = (typeof rawHost === 'string' && rawHost.trim()) ? rawHost.trim() : '127.0.0.1';
+
     try {
         await ensureTable();
         const pool = await getInfraConnection();
 
-        // Auto-verify if the parent base domain is already wildcard-verified
         const autoVerify = await isParentVerified(domain.toLowerCase());
 
         const { rows } = await pool.query(
-            `INSERT INTO docklet_proxy_domains (domain, target_port, verified, ssl_enabled)
-             VALUES ($1, $2, $3, $3)
+            `INSERT INTO docklet_proxy_domains (domain, target_port, target_host, verified, ssl_enabled)
+             VALUES ($1, $2, $3, $4, $4)
              ON CONFLICT (domain) DO UPDATE
                SET target_port = $2,
-                   verified    = GREATEST(docklet_proxy_domains.verified, $3),
-                   ssl_enabled = GREATEST(docklet_proxy_domains.ssl_enabled, $3),
+                   target_host = $3,
+                   verified    = GREATEST(docklet_proxy_domains.verified, $4),
+                   ssl_enabled = GREATEST(docklet_proxy_domains.ssl_enabled, $4),
                    updated_at  = NOW()
              RETURNING *`,
-            [domain.toLowerCase(), port, autoVerify]
+            [domain.toLowerCase(), port, targetHost, autoVerify]
         );
 
-        // Write HTTPS config immediately if auto-verified, otherwise HTTP-only
-        await writeConfig(domain.toLowerCase(), port, autoVerify);
+        await writeConfig(domain.toLowerCase(), targetHost, port, autoVerify);
 
         res.json({ domain: rows[0], autoVerified: autoVerify });
     } catch (err: any) {
@@ -266,9 +270,6 @@ router.post('/verify/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Enable SSL — Traefik handles ACME/Let's Encrypt automatically.
-// We simply update the dynamic config file to include TLS; Traefik provisions
-// the certificate when the first HTTPS request arrives.
 router.post('/ssl/:id', authenticateToken, async (req, res) => {
     try {
         await ensureTable();
@@ -277,12 +278,13 @@ router.post('/ssl/:id', authenticateToken, async (req, res) => {
         if (!rows[0]) return res.status(404).json({ message: 'Domain not found' });
         if (!rows[0].verified) return res.status(400).json({ message: 'Domain must be DNS-verified first' });
 
-        const domain: string = rows[0].domain;
-        const port: number = rows[0].target_port;
+        const domain: string   = rows[0].domain;
+        const port: number     = rows[0].target_port;
+        const targetHost: string = rows[0].target_host || '127.0.0.1';
         const domainId = req.params.id;
         const userId = ownerFromReq(req);
 
-        await writeConfig(domain, port, true);
+        await writeConfig(domain, targetHost, port, true);
         await pool.query('UPDATE docklet_proxy_domains SET ssl_enabled = TRUE, updated_at = NOW() WHERE id = $1', [domainId]);
 
         emitToUser(userId, 'ssl-status', {
@@ -296,9 +298,6 @@ router.post('/ssl/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Re-sync all Traefik config files from DB (Traefik hot-reloads automatically).
-// Also retroactively auto-verifies any subdomain whose parent base domain is
-// already wildcard-verified — fixes entries created before this feature existed.
 router.post('/reload', authenticateToken, async (_req, res) => {
     try {
         await ensureTable();
@@ -307,7 +306,7 @@ router.post('/reload', authenticateToken, async (_req, res) => {
         let autoFixed = 0;
         for (const row of rows) {
             let ssl = row.ssl_enabled ?? false;
-            // Retroactively auto-verify pending subdomains of verified base domains
+            const targetHost = row.target_host || '127.0.0.1';
             if (!row.verified) {
                 const parentOk = await isParentVerified(row.domain);
                 if (parentOk) {
@@ -319,7 +318,7 @@ router.post('/reload', authenticateToken, async (_req, res) => {
                     autoFixed++;
                 }
             }
-            await writeConfig(row.domain, row.target_port, ssl);
+            await writeConfig(row.domain, targetHost, row.target_port, ssl);
         }
         res.json({ ok: true, rewritten: rows.length, autoFixed });
     } catch (err: any) {
@@ -340,7 +339,6 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Traefik compose snippet for users to add to their docker-compose
 router.get('/traefik-snippet', authenticateToken, async (req, res) => {
     const email = (req.query.email as string) || 'admin@example.com';
     const snippet = `  traefik:
@@ -372,8 +370,6 @@ router.get('/traefik-snippet', authenticateToken, async (req, res) => {
 networks:
   proxy:
     external: true`;
-    // NOTE: No global HTTP→HTTPS redirect here — that blocks Let's Encrypt HTTP-01 challenges.
-    // Per-domain redirects are handled inside each traefik-configs/*.yml dynamic file.
     res.json({ snippet, email });
 });
 

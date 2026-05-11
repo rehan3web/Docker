@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
-import { useGetProxyDomains, getServerIp, createProxyDomain, verifyProxyDomain, enableProxySSL, deleteProxyDomain, reloadProxy, useGetVerifiedDomains, type ProxyDomain } from "@/api/client";
+import { useGetProxyDomains, getServerIp, createProxyDomain, verifyProxyDomain, enableProxySSL, deleteProxyDomain, reloadProxy, useGetVerifiedDomains, useGetDeployments, type ProxyDomain, type DeploySummary } from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function ProxyPage() {
@@ -26,10 +26,17 @@ export default function ProxyPage() {
   const { data: vdData } = useGetVerifiedDomains();
   const verifiedDomains = (vdData?.domains ?? []).filter(d => d.verified);
 
+  const { data: deplData } = useGetDeployments();
+  const railpackDeploys = (deplData?.deployments ?? []).filter(
+    d => d.status === "running" && d.containerName
+  );
+
   const [baseDomainId, setBaseDomainId] = useState<number | "">("");
   const [subdomain, setSubdomain] = useState("");
   const [domain, setDomain] = useState("");
+  const [targetType, setTargetType] = useState<"port" | "container">("port");
   const [targetPort, setTargetPort] = useState("");
+  const [selectedContainer, setSelectedContainer] = useState<DeploySummary | null>(null);
   const [creating, setCreating] = useState(false);
 
   const selectedVd = verifiedDomains.find(d => d.id === baseDomainId) ?? null;
@@ -55,17 +62,23 @@ export default function ProxyPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     const finalDomain = fullDomainPreview.trim();
-    if (!finalDomain || !targetPort.trim()) return;
+    const isContainer = targetType === "container";
+    const port = isContainer ? (selectedContainer?.containerPort ?? 80) : Number(targetPort);
+    const host = isContainer ? (selectedContainer?.containerName ?? "") : undefined;
+    if (!finalDomain) return;
+    if (isContainer && !host) return;
+    if (!isContainer && (!targetPort.trim() || isNaN(port))) return;
     setCreating(true);
     try {
-      const result = await createProxyDomain(finalDomain, Number(targetPort));
+      const result = await createProxyDomain(finalDomain, port, host);
       if (result?.autoVerified) {
         toast.success(`${finalDomain} — DNS auto-verified & SSL enabled via wildcard`);
       } else {
         toast.success(`${finalDomain} proxy created`);
       }
       qc.invalidateQueries({ queryKey: ["proxy-domains"] });
-      setDomain(""); setSubdomain(""); setBaseDomainId(""); setTargetPort(""); setShowCreate(false);
+      setDomain(""); setSubdomain(""); setBaseDomainId(""); setTargetPort("");
+      setSelectedContainer(null); setShowCreate(false);
     } catch (err: any) {
       toast.error(err.message || "Failed to create proxy");
     } finally { setCreating(false); }
@@ -175,6 +188,18 @@ export default function ProxyPage() {
               </CardHeader>
               <CardContent className="p-4 pt-2">
                 <form onSubmit={handleCreate} className="space-y-3">
+                  {/* Target type toggle */}
+                  <div className="flex items-center gap-1 p-1 bg-muted/40 rounded-lg w-fit">
+                    <button type="button" onClick={() => { setTargetType("port"); setSelectedContainer(null); }}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${targetType === "port" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                      Host Port
+                    </button>
+                    <button type="button" onClick={() => { setTargetType("container"); setTargetPort(""); }}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${targetType === "container" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                      Container (Railpack)
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {verifiedDomains.length > 0 ? (
                       <div className="space-y-1">
@@ -212,18 +237,66 @@ export default function ProxyPage() {
                         disabled={!verifiedDomains.length}
                       />
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Target Port</Label>
-                      <Input value={targetPort} onChange={e => setTargetPort(e.target.value)} placeholder="8000" type="number" min={1} max={65535} className="font-mono text-xs h-9" />
-                    </div>
+
+                    {targetType === "port" ? (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Target Port</Label>
+                        <Input value={targetPort} onChange={e => setTargetPort(e.target.value)} placeholder="8000" type="number" min={1} max={65535} className="font-mono text-xs h-9" />
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Container</Label>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="w-full h-9 text-xs justify-between font-mono px-3">
+                              <span className={!selectedContainer ? "text-muted-foreground" : "truncate"}>
+                                {selectedContainer ? selectedContainer.name : "— Select container —"}
+                              </span>
+                              <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="w-full min-w-[240px] rounded-xl p-1.5 shadow-lg">
+                            <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer text-xs text-muted-foreground" onClick={() => setSelectedContainer(null)}>— Select container —</DropdownMenuItem>
+                            {railpackDeploys.length === 0 && (
+                              <DropdownMenuItem disabled className="px-2.5 py-2 rounded-lg text-xs text-muted-foreground/60">No running railpack deployments</DropdownMenuItem>
+                            )}
+                            {railpackDeploys.map(d => (
+                              <DropdownMenuItem key={d.id} className="px-2.5 py-2 rounded-lg cursor-pointer gap-2 text-xs" onClick={() => setSelectedContainer(d)}>
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="font-medium truncate">{d.name}</p>
+                                  <p className="text-muted-foreground font-mono text-[10px] truncate">{d.containerName}:{d.containerPort ?? 80}</p>
+                                </div>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    )}
                   </div>
+
                   {fullDomainPreview && (
                     <p className="text-[11px] text-muted-foreground font-mono">
-                      → <span className="text-foreground">{fullDomainPreview}</span> : {targetPort || "?"}
+                      → <span className="text-foreground">{fullDomainPreview}</span>
+                      {" "}→{" "}
+                      {targetType === "port"
+                        ? <span className="text-foreground">127.0.0.1:{targetPort || "?"}</span>
+                        : selectedContainer
+                          ? <span className="text-foreground">{selectedContainer.containerName}:{selectedContainer.containerPort ?? 80}</span>
+                          : <span className="text-muted-foreground">select a container</span>
+                      }
                     </p>
                   )}
                   <div className="flex gap-2">
-                    <Button type="submit" disabled={creating || !fullDomainPreview.trim() || !targetPort.trim()} className="h-9 px-5 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+                    <Button
+                      type="submit"
+                      disabled={
+                        creating ||
+                        !fullDomainPreview.trim() ||
+                        (targetType === "port" ? !targetPort.trim() : !selectedContainer)
+                      }
+                      className="h-9 px-5 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none"
+                    >
                       {creating && <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />}Create
                     </Button>
                     <Button type="button" variant="ghost" className="h-9 px-3 text-xs" onClick={() => setShowCreate(false)}>Cancel</Button>
@@ -289,7 +362,11 @@ export default function ProxyPage() {
                     <CardHeader className="p-4 pb-3 border-b border-border/50 flex-row items-center justify-between">
                       <div>
                         <CardTitle className="text-sm font-medium font-mono">{selected.domain}</CardTitle>
-                        <CardDescription className="text-xs text-muted-foreground">Port {selected.target_port}</CardDescription>
+                        <CardDescription className="text-xs text-muted-foreground font-mono">
+                      {selected.target_host && selected.target_host !== "127.0.0.1"
+                        ? `${selected.target_host}:${selected.target_port}`
+                        : `localhost:${selected.target_port}`}
+                    </CardDescription>
                       </div>
                       <div className="flex items-center gap-2">
                         <ProxyStatusBadge domain={selected} />
@@ -394,7 +471,12 @@ export default function ProxyPage() {
                               https://{selected.domain}
                             </a>
                             <p className="text-xs text-muted-foreground mt-1">
-                              Proxying to <span className="font-mono">127.0.0.1:{selected.target_port}</span>. Traefik provisions the cert on first HTTPS request.
+                              Proxying to{" "}
+                              <span className="font-mono">
+                                {selected.target_host && selected.target_host !== "127.0.0.1"
+                                  ? `${selected.target_host}:${selected.target_port}`
+                                  : `127.0.0.1:${selected.target_port}`}
+                              </span>. Traefik provisions the cert on first HTTPS request.
                             </p>
                           </div>
                         </div>
