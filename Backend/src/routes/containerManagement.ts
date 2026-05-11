@@ -844,6 +844,10 @@ router.post('/containers/:name/domain/traefik', async (req, res) => {
                 // Brief pause — Docker needs a moment to release the container name
                 await new Promise(r => setTimeout(r, 800));
 
+                // Collect all networks the old container was connected to
+                const oldNetworks = Object.entries(info.NetworkSettings?.Networks ?? {});
+                const [firstNetName, firstNetCfg] = oldNetworks[0] ?? [];
+
                 const newContainer = await docker.createContainer({
                     name,
                     Image: info.Config.Image,
@@ -855,9 +859,34 @@ router.post('/containers/:name/domain/traefik', async (req, res) => {
                     User: info.Config.User || undefined,
                     HostConfig: sanitiseHostConfig(info.HostConfig),
                     Labels: mergedLabels,
+                    // Reconnect to the first network during creation
+                    ...(firstNetName ? {
+                        NetworkingConfig: {
+                            EndpointsConfig: {
+                                [firstNetName]: {
+                                    IPAMConfig: firstNetCfg?.IPAMConfig ?? {},
+                                    Aliases: firstNetCfg?.Aliases ?? [],
+                                },
+                            },
+                        },
+                    } : {}),
                 });
                 await newContainer.start();
-                console.log(`[Traefik] Container "${name}" recreated and started.`);
+
+                // Reconnect to any additional networks (Docker only allows one at create-time)
+                for (const [netName, netCfg] of oldNetworks.slice(1)) {
+                    try {
+                        const network = docker.getNetwork((netCfg as any).NetworkID || netName);
+                        await (network as any).connect({
+                            Container: newContainer.id,
+                            EndpointConfig: { Aliases: (netCfg as any)?.Aliases ?? [] },
+                        });
+                    } catch (netErr: any) {
+                        console.warn(`[Traefik] Could not rejoin network "${netName}": ${netErr.message}`);
+                    }
+                }
+
+                console.log(`[Traefik] Container "${name}" recreated and started (networks: ${oldNetworks.map(([n]) => n).join(', ') || 'default'}).`);
 
             } catch (bgErr: any) {
                 console.error(`[Traefik] Background recreation failed for "${name}":`, bgErr.message);

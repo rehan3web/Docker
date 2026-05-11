@@ -156,6 +156,8 @@ services:
     command:
       - "--log.level=INFO"
       - "--accesslog=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
       - "--providers.file.directory=/traefik-configs"
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
