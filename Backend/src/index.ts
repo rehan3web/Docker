@@ -156,6 +156,6 @@ server.listen(Number(PORT), '0.0.0.0', () => {
         .then(() => console.log('[InfraDB] Connected to dockelt_data'))
         .catch(err => console.error('[InfraDB] Init error:', err.message));
     initScheduler();
-    initBuildQueue();
+    initBuildQueue().catch(err => console.error('[BuildQueue] Init error:', err.message));
     initContainerManagement().catch(err => console.error('[ContainerMgmt] Init failed:', err.message));
 });

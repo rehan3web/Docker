@@ -2,6 +2,8 @@ import { Queue, Worker, Job } from 'bullmq';
 import { spawn, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import https from 'https';
+import { createWriteStream } from 'fs';
 import { emitToUser } from './socket';
 import { getRedis, redisReady } from './redis';
 
@@ -106,18 +108,76 @@ export function emitStatus(id: string, status: DeployStatus, extra?: Record<stri
     if (rec?.ownerId) emitToUser(rec.ownerId, 'deploy-status', { id, status, ...extra });
 }
 
-// ── Build helpers ─────────────────────────────────────────────────────────────
+// ── Spawn helper — always inherits full process env so PATH is correct ────────
 
 function runStreamed(id: string, command: string, args: string[], cwd: string): Promise<number> {
     return new Promise((resolve) => {
         emitLog(id, 'system', `\n$ ${command} ${args.join(' ')}\n`);
-        const child = spawn(command, args, { cwd });
+        const child = spawn(command, args, { cwd, env: process.env });
         child.stdout.on('data', (d) => emitLog(id, 'stdout', d.toString()));
         child.stderr.on('data', (d) => emitLog(id, 'stderr', d.toString()));
         child.on('error', (err) => { emitLog(id, 'stderr', `\n[spawn error: ${err.message}]\n`); resolve(-1); });
         child.on('close', (code) => resolve(code ?? -1));
     });
 }
+
+// ── RailPack auto-install ─────────────────────────────────────────────────────
+
+const RAILPACK_VERSION = 'v0.23.0';
+const RAILPACK_URL     = `https://github.com/railwayapp/railpack/releases/download/${RAILPACK_VERSION}/railpack-${RAILPACK_VERSION}-x86_64-unknown-linux-musl.tar.gz`;
+const RAILPACK_INSTALL = path.join(process.env.HOME || '/home/runner', '.local', 'bin');
+
+function railpackInPath(): boolean {
+    try { execSync('railpack --version', { stdio: 'ignore', env: process.env }); return true; } catch { return false; }
+}
+
+function downloadFile(url: string, dest: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const follow = (u: string) => {
+            https.get(u, (res) => {
+                if (res.statusCode === 301 || res.statusCode === 302) { follow(res.headers.location!); return; }
+                if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode} for ${u}`)); return; }
+                const file = createWriteStream(dest);
+                res.pipe(file);
+                file.on('finish', () => file.close(() => resolve()));
+                file.on('error', reject);
+            }).on('error', reject);
+        };
+        follow(url);
+    });
+}
+
+async function ensureRailpack(): Promise<void> {
+    if (railpackInPath()) {
+        console.log('[BuildQueue] railpack already installed');
+        return;
+    }
+    console.log('[BuildQueue] railpack not found — auto-installing...');
+    try {
+        fs.mkdirSync(RAILPACK_INSTALL, { recursive: true });
+        const tarPath = path.join(RAILPACK_INSTALL, 'railpack.tar.gz');
+        await downloadFile(RAILPACK_URL, tarPath);
+        execSync(`tar -xzf "${tarPath}" -C "${RAILPACK_INSTALL}"`, { stdio: 'inherit' });
+        fs.unlinkSync(tarPath);
+        fs.chmodSync(path.join(RAILPACK_INSTALL, 'railpack'), 0o755);
+
+        // Ensure the install dir is in process.env.PATH for all future spawns
+        const cur = process.env.PATH || '';
+        if (!cur.includes(RAILPACK_INSTALL)) {
+            process.env.PATH = `${RAILPACK_INSTALL}:${cur}`;
+        }
+
+        if (railpackInPath()) {
+            console.log(`[BuildQueue] railpack ${RAILPACK_VERSION} installed successfully`);
+        } else {
+            console.warn('[BuildQueue] railpack install completed but binary still not found in PATH');
+        }
+    } catch (err: any) {
+        console.warn('[BuildQueue] railpack auto-install failed:', err.message);
+    }
+}
+
+// ── Build logic ───────────────────────────────────────────────────────────────
 
 function parseExposedPort(dockerfilePath: string): number | null {
     try {
@@ -133,35 +193,6 @@ function parseExposedPort(dockerfilePath: string): number | null {
 function dockerAvailable() {
     try { return fs.existsSync('/var/run/docker.sock'); } catch { return false; }
 }
-
-const RAILPACK_SEARCH = [
-    process.env.RAILPACK_PATH,
-    '/home/runner/.local/bin/railpack',
-    `${process.env.HOME}/.local/bin/railpack`,
-    '/usr/local/bin/railpack',
-    '/usr/bin/railpack',
-].filter(Boolean) as string[];
-
-let _railpackPath: string | null | undefined = undefined; // undefined = not yet resolved
-
-function resolveRailpack(): string | null {
-    if (_railpackPath !== undefined) return _railpackPath;
-    // Check explicit paths first
-    for (const p of RAILPACK_SEARCH) {
-        try { if (fs.existsSync(p)) { _railpackPath = p; return p; } } catch { /* skip */ }
-    }
-    // Fall back to PATH resolution
-    try {
-        const found = execSync('which railpack 2>/dev/null', { encoding: 'utf8' }).trim();
-        if (found) { _railpackPath = found; return found; }
-    } catch { /* not in PATH */ }
-    _railpackPath = null;
-    return null;
-}
-
-function railpackAvailable() { return resolveRailpack() !== null; }
-
-// ── Core build logic ──────────────────────────────────────────────────────────
 
 async function runBuild(id: string) {
     const record = deployments.get(id);
@@ -195,7 +226,7 @@ async function runBuild(id: string) {
         const hasDockerfile  = fs.existsSync(dockerfilePath);
 
         if (hasDockerfile) {
-            // ── Docker build ───────────────────────────────────────────────────
+            // ── Docker build ──────────────────────────────────────────────────
             record.buildMethod = 'docker';
             emitLog(id, 'system', '\nDockerfile found → using Docker build\n');
 
@@ -227,12 +258,12 @@ async function runBuild(id: string) {
             await _startContainer(id, record, containerName, imageTag, hostPort, containerPort);
 
         } else {
-            // ── RailPack build ─────────────────────────────────────────────────
+            // ── RailPack build ────────────────────────────────────────────────
             record.buildMethod = 'railpack';
             emitLog(id, 'system', '\nNo Dockerfile found → using RailPack auto-detect build\n');
 
-            if (!railpackAvailable()) {
-                record.error = 'railpack CLI not found. Install it on the host: curl -sSL https://railpack.io/install.sh | sh';
+            if (!railpackInPath()) {
+                record.error = 'railpack not available — auto-install failed at startup';
                 record.finishedAt = Date.now();
                 emitLog(id, 'stderr', `\n[${record.error}]\n`);
                 return emitStatus(id, 'failed', { error: record.error });
@@ -240,22 +271,20 @@ async function runBuild(id: string) {
 
             emitStatus(id, 'building');
             emitLog(id, 'system', `\nRailPack auto-detecting runtime and building image ${imageTag}...\n`);
-            const rpBin = resolveRailpack()!;
-            const rpCode = await runStreamed(id, rpBin, ['build', '--name', imageTag, '--progress', 'plain', '.'], cloneDir);
+            const rpCode = await runStreamed(id, 'railpack', ['build', '--name', imageTag, '--progress', 'plain', '.'], cloneDir);
             if (rpCode !== 0) {
                 record.error = `railpack build failed (exit ${rpCode})`;
                 record.finishedAt = Date.now();
                 return emitStatus(id, 'failed', { error: record.error });
             }
 
-            // RailPack does not guarantee an EXPOSE — start without port binding unless user sets one
-            emitLog(id, 'system', '\nRailPack build complete — starting container (no port auto-detection)\n');
+            emitLog(id, 'system', '\nRailPack build complete — starting container\n');
             await _startContainer(id, record, containerName, imageTag, null, null);
         }
 
     } catch (err: any) {
-        record.status    = 'failed';
-        record.error     = err?.message || String(err);
+        record.status     = 'failed';
+        record.error      = err?.message || String(err);
         record.finishedAt = Date.now();
         emitLog(id, 'stderr', `\n[deploy failed: ${record.error}]\n`);
         emitStatus(id, 'failed', { error: record.error });
@@ -263,12 +292,9 @@ async function runBuild(id: string) {
 }
 
 async function _startContainer(
-    id: string,
-    record: DeployRecord,
-    containerName: string,
-    imageTag: string,
-    hostPort: number | null,
-    containerPort: number | null,
+    id: string, record: DeployRecord,
+    containerName: string, imageTag: string,
+    hostPort: number | null, containerPort: number | null,
 ) {
     emitStatus(id, 'running');
     emitLog(id, 'system', `\nStarting container ${containerName}\n`);
@@ -291,9 +317,9 @@ async function _startContainer(
         savePortRegistry();
     }
 
-    record.status      = 'success';
-    record.finishedAt  = Date.now();
-    const portMsg      = hostPort ? ` — accessible on host port ${hostPort}` : '';
+    record.status     = 'success';
+    record.finishedAt = Date.now();
+    const portMsg     = hostPort ? ` — accessible on host port ${hostPort}` : '';
     emitLog(id, 'system', `\nDeployment successful: container ${containerName} is running${portMsg}.\n`);
     emitStatus(id, 'success', { containerName, imageTag, hostPort, containerPort, buildMethod: record.buildMethod });
 }
@@ -303,8 +329,7 @@ async function _startContainer(
 let bullQueue: Queue | null   = null;
 let bullWorker: Worker | null = null;
 
-// In-memory fallback (when Redis not available)
-let memRunning  = 0;
+let memRunning = 0;
 const memQueue: string[] = [];
 
 async function memWorkerRun(id: string) {
@@ -319,29 +344,27 @@ async function memWorkerRun(id: string) {
 }
 
 function updateQueuePositions() {
-    memQueue.forEach((id, i) => {
-        const r = deployments.get(id);
-        if (r) r.queuePosition = i + 1;
-    });
+    memQueue.forEach((id, i) => { const r = deployments.get(id); if (r) r.queuePosition = i + 1; });
 }
 
-export function initBuildQueue() {
+export async function initBuildQueue(): Promise<void> {
+    // Auto-install railpack if missing — runs once at startup
+    await ensureRailpack();
+
     if (redisReady()) {
         try {
             const connOpts = { host: 'docklet-redis', port: 6379 };
-            bullQueue = new Queue('builds', { connection: connOpts });
+            bullQueue  = new Queue('builds', { connection: connOpts });
             bullWorker = new Worker('builds', async (job: Job) => {
-                const { id } = job.data;
-                await runBuild(id);
+                await runBuild(job.data.id);
             }, { connection: connOpts, concurrency: MAX_PARALLEL });
 
             bullWorker.on('failed', (job, err) => {
-                if (job) {
-                    const rec = deployments.get(job.data.id);
-                    if (rec && rec.status !== 'failed') {
-                        rec.status = 'failed'; rec.error = err.message; rec.finishedAt = Date.now();
-                        emitStatus(job.data.id, 'failed', { error: err.message });
-                    }
+                if (!job) return;
+                const rec = deployments.get(job.data.id);
+                if (rec && rec.status !== 'failed') {
+                    rec.status = 'failed'; rec.error = err.message; rec.finishedAt = Date.now();
+                    emitStatus(job.data.id, 'failed', { error: err.message });
                 }
             });
 
@@ -351,7 +374,7 @@ export function initBuildQueue() {
             bullQueue = null; bullWorker = null;
         }
     } else {
-        console.log(`[BuildQueue] Redis not available — using in-memory queue (max ${MAX_PARALLEL} parallel builds)`);
+        console.log(`[BuildQueue] in-memory queue (max ${MAX_PARALLEL} parallel builds)`);
     }
 }
 
@@ -362,10 +385,7 @@ export async function enqueueBuild(id: string): Promise<void> {
     if (bullQueue) {
         rec.status = 'queued';
         rSetStatus(id, 'queued');
-        await bullQueue.add('build', { id }, {
-            attempts: 2,
-            backoff: { type: 'fixed', delay: 5000 },
-        });
+        await bullQueue.add('build', { id }, { attempts: 2, backoff: { type: 'fixed', delay: 5000 } });
         const waiting = await bullQueue.getWaitingCount();
         rec.queuePosition = waiting;
         if (rec.ownerId) emitToUser(rec.ownerId, 'deploy-status', { id, status: 'queued', queuePosition: waiting });
