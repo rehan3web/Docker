@@ -276,6 +276,54 @@ async function ensureRailpack(id: string): Promise<void> {
     }
 }
 
+// ── BuildKit daemon ───────────────────────────────────────────────────────────
+// railpack build requires a BuildKit daemon and reads BUILDKIT_HOST.
+// We auto-start one as a privileged Docker container (moby/buildkit) if needed.
+
+const BUILDKIT_CONTAINER = 'docklet-buildkit';
+const BUILDKIT_HOST_VAL  = `docker-container://${BUILDKIT_CONTAINER}`;
+
+async function ensureBuildKit(id: string): Promise<void> {
+    // Honour a pre-configured BUILDKIT_HOST (e.g. user set it in compose env)
+    if (process.env.BUILDKIT_HOST) {
+        blogLog(id, `BuildKit host: ${process.env.BUILDKIT_HOST}`);
+        return;
+    }
+
+    // Check if our managed container is already running
+    try {
+        const out = execSync(
+            `docker ps --filter name=${BUILDKIT_CONTAINER} --filter status=running --format '{{.Names}}'`,
+            { stdio: 'pipe', env: process.env }
+        ).toString().trim();
+        if (out.includes(BUILDKIT_CONTAINER)) {
+            blogLog(id, 'BuildKit daemon already running');
+            process.env.BUILDKIT_HOST = BUILDKIT_HOST_VAL;
+            return;
+        }
+    } catch { /* docker call failed — fall through to start attempt */ }
+
+    blogLog(id, 'Starting BuildKit daemon...');
+    try {
+        // Remove any stopped container with the same name so docker run doesn't conflict
+        try { execSync(`docker rm -f ${BUILDKIT_CONTAINER}`, { stdio: 'pipe', env: process.env }); } catch { /* didn't exist */ }
+
+        execSync(
+            `docker run --rm --privileged -d --name ${BUILDKIT_CONTAINER} moby/buildkit`,
+            { stdio: 'pipe', env: process.env, timeout: 60_000 }
+        );
+
+        // Give BuildKit ~2 s to initialise its gRPC socket
+        await new Promise(r => setTimeout(r, 2000));
+
+        process.env.BUILDKIT_HOST = BUILDKIT_HOST_VAL;
+        blogLog(id, `BuildKit daemon started (${BUILDKIT_CONTAINER})`);
+    } catch (err: any) {
+        blogLog(id, `WARNING: could not start BuildKit daemon — ${err.message}`);
+        blogLog(id, 'Tip: set BUILDKIT_HOST in the compose env to use an existing BuildKit socket');
+    }
+}
+
 // ── Build logic ───────────────────────────────────────────────────────────────
 
 function parseExposedPort(dockerfilePath: string): number | null {
@@ -370,6 +418,9 @@ async function runBuild(id: string) {
                 emitLog(id, 'stderr', `\n[${record.error}]\n`);
                 return emitStatus(id, 'failed', { error: record.error });
             }
+
+            // Ensure BuildKit daemon is running — railpack requires BUILDKIT_HOST
+            await ensureBuildKit(id);
 
             emitStatus(id, 'building');
             emitLog(id, 'system', `\nRailPack auto-detecting runtime and building image ${imageTag}...\n`);
