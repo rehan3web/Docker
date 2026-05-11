@@ -538,7 +538,70 @@ function updateQueuePositions() {
     memQueue.forEach((id, i) => { const r = deployments.get(id); if (r) r.queuePosition = i + 1; });
 }
 
+// ── Startup reconciliation ────────────────────────────────────────────────────
+// After a server restart the in-memory `deployments` Map is empty, but railpack
+// containers (named nb-*) may still be running on the docklet-apps network.
+// This scans Docker and re-creates synthetic DeployRecords so the Reverse Proxy
+// dropdown keeps showing them without requiring a new deploy.
+
+async function reconcileRunningContainers(): Promise<void> {
+    try {
+        const { execSync: exec } = await import('child_process');
+        // List all running containers whose name starts with nb-
+        const raw = exec(
+            `docker ps --filter "name=nb-" --format "{{.Names}}\t{{.Image}}"`,
+            { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+        if (!raw) return;
+
+        let restored = 0;
+        for (const line of raw.split('\n')) {
+            const [containerName, imageName] = line.split('\t');
+            if (!containerName || !containerName.startsWith('nb-')) continue;
+            // Skip if we already have a live record for this container
+            const existing = Array.from(deployments.values()).find(d => d.containerName === containerName);
+            if (existing) continue;
+
+            // Derive a stable synthetic ID from the container name
+            const syntheticId = `reconciled_${containerName}`;
+            // Derive display name: strip leading "nb-" and trailing deploy-id suffix
+            // containerName format: nb-{projectName}-{timestamp}_{random}
+            // We strip nb- prefix and use everything up to the last two _-separated parts
+            const withoutPrefix = containerName.replace(/^nb-/, '');
+            const parts = withoutPrefix.split('-');
+            // Last part looks like "1778489332634_6eybj2" — if so, strip it
+            const lastPart = parts[parts.length - 1];
+            const displayName = /^\d{10,}_[a-z0-9]+$/.test(lastPart)
+                ? parts.slice(0, -1).join('-')
+                : withoutPrefix;
+
+            const rec: DeployRecord = {
+                id: syntheticId,
+                repo: imageName ?? '',
+                name: displayName,
+                ownerId: 'system',
+                status: 'success',
+                buildMethod: 'railpack',
+                startedAt: Date.now(),
+                finishedAt: Date.now(),
+                containerName,
+                containerPort: 80,
+                proxyNetwork: 'docklet-apps',
+                logs: [],
+            };
+            deployments.set(syntheticId, rec);
+            restored++;
+        }
+        if (restored > 0) console.log(`[BuildQueue] Reconciled ${restored} running railpack container(s)`);
+    } catch (e: any) {
+        console.warn('[BuildQueue] Container reconciliation skipped:', e.message);
+    }
+}
+
 export async function initBuildQueue(): Promise<void> {
+    // Rediscover railpack containers that survived a server restart
+    await reconcileRunningContainers();
+
     if (redisReady()) {
         try {
             const connOpts = { host: 'docklet-redis', port: 6379 };
