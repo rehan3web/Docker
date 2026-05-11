@@ -3,11 +3,19 @@ import { authenticateToken } from '../middleware/auth';
 import { executeQuery } from '../lib/db';
 import { broadcastSchemaChange, broadcastTableUpdate } from '../index';
 import { getThroughput } from '../lib/queryTracker';
+import { cacheGet, cacheSet, cacheDel } from '../lib/redis';
+
+const DB_CACHE_KEYS = ['db:overview', 'db:stats', 'db:tables', 'db:tables-extended', 'db:schema'];
+async function invalidateDbCache() {
+    await cacheDel(...DB_CACHE_KEYS).catch(() => {});
+}
 
 const router = express.Router();
 
 // Get db overview for dashboard
 router.get('/overview', authenticateToken, async (_req, res) => {
+    const cached = await cacheGet<any>('db:overview');
+    if (cached) return res.json(cached);
     try {
         const sizeResult = await executeQuery(`
             SELECT pg_size_pretty(pg_database_size(current_database())) as size_pretty
@@ -18,11 +26,13 @@ router.get('/overview', authenticateToken, async (_req, res) => {
         const connectionsResult = await executeQuery(`
             SELECT count(*) FROM pg_stat_activity WHERE state = 'active'
         `);
-        res.json({
+        const data = {
             activeConnections: parseInt(connectionsResult.rows[0].count),
             databaseSize: sizeResult.rows[0].size_pretty,
             tableCount: parseInt(tablesResult.rows[0].count),
-        });
+        };
+        await cacheSet('db:overview', data, 8);
+        res.json(data);
     } catch (err: any) {
         res.status(500).json(err);
     }
@@ -35,6 +45,8 @@ router.get('/throughput', authenticateToken, (_req, res) => {
 
 // Get active query activity
 router.get('/activity', authenticateToken, async (_req, res) => {
+    const cached = await cacheGet<any>('db:activity');
+    if (cached) return res.json(cached);
     try {
         const result = await executeQuery(`
             SELECT
@@ -56,12 +68,12 @@ router.get('/activity', authenticateToken, async (_req, res) => {
             state: row.state,
             query: row.query,
             startedAt: row.query_start ? row.query_start.toISOString() : new Date().toISOString(),
-            duration: row.duration
-                ? formatDuration(row.duration)
-                : '0ms',
+            duration: row.duration ? formatDuration(row.duration) : '0ms',
             waitEvent: row.wait_event,
         }));
-        res.json({ activities });
+        const data = { activities };
+        await cacheSet('db:activity', data, 5);
+        res.json(data);
     } catch (err: any) {
         res.status(500).json(err);
     }
@@ -69,6 +81,8 @@ router.get('/activity', authenticateToken, async (_req, res) => {
 
 // Tables with row count and size
 router.get('/tables-extended', authenticateToken, async (_req, res) => {
+    const cached = await cacheGet<any>('db:tables-extended');
+    if (cached) return res.json(cached);
     try {
         const result = await executeQuery(`
             SELECT
@@ -80,7 +94,9 @@ router.get('/tables-extended', authenticateToken, async (_req, res) => {
             WHERE t.table_schema = 'public'
             ORDER BY t.table_name
         `);
-        res.json({ tables: result.rows });
+        const data = { tables: result.rows };
+        await cacheSet('db:tables-extended', data, 15);
+        res.json(data);
     } catch (err: any) {
         res.status(500).json(err);
     }
@@ -88,6 +104,7 @@ router.get('/tables-extended', authenticateToken, async (_req, res) => {
 
 // Create table
 router.post('/tables', authenticateToken, async (req, res) => {
+    invalidateDbCache();
     const { tableName, columns } = req.body;
     if (!tableName) return res.status(400).json({ message: 'Table name is required' });
 
@@ -135,6 +152,8 @@ router.patch('/tables/:name/rename', authenticateToken, async (req, res) => {
 
 // List all tables
 router.get('/tables', authenticateToken, async (_req, res) => {
+    const cached = await cacheGet<any>('db:tables');
+    if (cached) return res.json(cached);
     try {
         const result = await executeQuery(`
             SELECT table_name 
@@ -142,6 +161,7 @@ router.get('/tables', authenticateToken, async (_req, res) => {
             WHERE table_schema = 'public' 
             ORDER BY table_name
         `);
+        await cacheSet('db:tables', result.rows, 30);
         res.json(result.rows);
     } catch (error: any) {
         res.status(500).json(error);
@@ -435,30 +455,24 @@ router.get('/schema', authenticateToken, async (_req, res) => {
 
 // Get database stats
 router.get('/stats', authenticateToken, async (_req, res) => {
+    const cached = await cacheGet<any>('db:stats');
+    if (cached) return res.json({ ...cached, throughput: getThroughput() });
     try {
-        const tablesResult = await executeQuery(`
-            SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'
-        `);
-        const rowsResult = await executeQuery(`
-            SELECT sum(n_live_tup) as total_rows FROM pg_stat_user_tables
-        `);
-        const sizeResult = await executeQuery(`
-            SELECT pg_database_size(current_database()) as size_bytes,
-                   pg_size_pretty(pg_database_size(current_database())) as size_pretty
-        `);
-        const connectionsResult = await executeQuery(`
-            SELECT count(*) FROM pg_stat_activity
-        `);
-        const throughput = getThroughput();
-
-        res.json({
+        const [tablesResult, rowsResult, sizeResult, connectionsResult] = await Promise.all([
+            executeQuery(`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'`),
+            executeQuery(`SELECT sum(n_live_tup) as total_rows FROM pg_stat_user_tables`),
+            executeQuery(`SELECT pg_database_size(current_database()) as size_bytes, pg_size_pretty(pg_database_size(current_database())) as size_pretty`),
+            executeQuery(`SELECT count(*) FROM pg_stat_activity`),
+        ]);
+        const data = {
             totalTables: parseInt(tablesResult.rows[0].count),
             totalRows: parseInt(rowsResult.rows[0].total_rows || '0'),
             dbSize: sizeResult.rows[0].size_pretty,
             dbSizeBytes: parseInt(sizeResult.rows[0].size_bytes),
             activeConnections: parseInt(connectionsResult.rows[0].count),
-            throughput
-        });
+        };
+        await cacheSet('db:stats', data, 5);
+        res.json({ ...data, throughput: getThroughput() });
     } catch (error: any) {
         res.status(500).json(error);
     }
@@ -466,6 +480,7 @@ router.get('/stats', authenticateToken, async (_req, res) => {
 
 // Delete column
 router.delete('/tables/:name/columns/:column', authenticateToken, async (req, res) => {
+    invalidateDbCache();
     const { name, column } = req.params;
     try {
         await executeQuery(`ALTER TABLE "${name}" DROP COLUMN "${column}" CASCADE`);

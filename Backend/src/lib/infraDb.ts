@@ -65,12 +65,39 @@ function buildDirectPool(database: string): Pool {
     });
 }
 
+async function ensureIndexes(pool: Pool): Promise<void> {
+    const indexes: [string, string][] = [
+        ['idx_docklet_settings_key',          'CREATE INDEX IF NOT EXISTS idx_docklet_settings_key ON nextbase_settings (key)'],
+        ['idx_container_domains_name',         'CREATE INDEX IF NOT EXISTS idx_container_domains_name ON container_domains (container_name)'],
+        ['idx_container_domains_domain',       'CREATE INDEX IF NOT EXISTS idx_container_domains_domain ON container_domains (domain)'],
+        ['idx_container_schedules_name',       'CREATE INDEX IF NOT EXISTS idx_container_schedules_name ON container_schedules (container_name)'],
+        ['idx_container_schedules_enabled',    'CREATE INDEX IF NOT EXISTS idx_container_schedules_enabled ON container_schedules (container_name, enabled)'],
+        ['idx_schedule_logs_schedule',         'CREATE INDEX IF NOT EXISTS idx_schedule_logs_schedule ON container_schedule_logs (schedule_id, created_at DESC)'],
+        ['idx_container_backups_name',         'CREATE INDEX IF NOT EXISTS idx_container_backups_name ON container_backups (container_name)'],
+        ['idx_container_backups_created',      'CREATE INDEX IF NOT EXISTS idx_container_backups_created ON container_backups (container_name, created_at DESC)'],
+        ['idx_verified_domains_domain',        'CREATE INDEX IF NOT EXISTS idx_verified_domains_domain ON verified_domains (domain)'],
+        ['idx_verified_domains_verified',      'CREATE INDEX IF NOT EXISTS idx_verified_domains_verified ON verified_domains (verified)'],
+        ['idx_proxy_domains_domain',           'CREATE INDEX IF NOT EXISTS idx_proxy_domains_domain ON docklet_proxy_domains (domain)'],
+        ['idx_proxy_domains_verified',         'CREATE INDEX IF NOT EXISTS idx_proxy_domains_verified ON docklet_proxy_domains (verified)'],
+        ['idx_container_env_vars_container',   'CREATE INDEX IF NOT EXISTS idx_container_env_vars_container ON container_env_vars (container_name)'],
+        ['idx_container_env_history_name',     'CREATE INDEX IF NOT EXISTS idx_container_env_history_name ON container_env_history (container_name, applied_at DESC)'],
+        ['idx_deploy_jobs_user',               'CREATE INDEX IF NOT EXISTS idx_deploy_jobs_user ON deploy_jobs (user_id, created_at DESC)'],
+    ];
+
+    for (const [, sql] of indexes) {
+        try { await pool.query(sql); } catch { /* table may not exist yet — skip */ }
+    }
+    console.log('[InfraDB] Indexes ensured');
+}
+
 export async function getInfraConnection(): Promise<Pool> {
     if (infraPool) return infraPool;
 
     await ensureInfraDbExists();
 
     infraPool = buildDirectPool(INFRA_DB);
+    // Run index migrations in the background — non-blocking
+    ensureIndexes(infraPool).catch(err => console.warn('[InfraDB] Index migration warning:', err.message));
     return infraPool;
 }
 

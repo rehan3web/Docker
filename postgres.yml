@@ -99,6 +99,7 @@ services:
       SELF_CONTAINER_NAME: docklet-server
       # ── Optional features ────────────────────────────────────────
       ENABLE_2FA: ${ENABLE_2FA:-false}
+      REDIS_URL:  ${REDIS_URL:-}
     volumes:
       # Docker socket — required for pg_dump via docker exec
       - /var/run/docker.sock:/var/run/docker.sock

@@ -4,6 +4,7 @@ import fs from 'fs';
 import { spawn, execSync } from 'child_process';
 import { Socket } from 'socket.io';
 import { authenticateToken } from '../middleware/auth';
+import { cacheGet, cacheSet, cacheDel } from '../lib/redis';
 
 const router = express.Router();
 
@@ -33,11 +34,13 @@ function dockerAvailable(): { ok: boolean; reason?: string } {
 }
 
 router.get('/status', authenticateToken, async (_req, res) => {
+    const cached = await cacheGet<any>('docker:status');
+    if (cached) return res.json(cached);
     const avail = dockerAvailable();
     if (!avail.ok) return res.json({ available: false, reason: avail.reason });
     try {
         const info = await getDocker().info();
-        res.json({
+        const data = {
             available: true,
             containers: info.Containers,
             running: info.ContainersRunning,
@@ -46,13 +49,17 @@ router.get('/status', authenticateToken, async (_req, res) => {
             images: info.Images,
             serverVersion: info.ServerVersion,
             os: info.OperatingSystem,
-        });
+        };
+        await cacheSet('docker:status', data, 8);
+        res.json(data);
     } catch (err: any) {
         res.json({ available: false, reason: err.message });
     }
 });
 
 router.get('/containers', authenticateToken, async (_req, res) => {
+    const cached = await cacheGet<any>('docker:containers');
+    if (cached) return res.json(cached);
     const avail = dockerAvailable();
     if (!avail.ok) return res.status(503).json({ available: false, reason: avail.reason, containers: [] });
     try {
@@ -73,7 +80,9 @@ router.get('/containers', authenticateToken, async (_req, res) => {
                 type: p.Type,
             })),
         }));
-        res.json({ available: true, containers });
+        const data = { available: true, containers };
+        await cacheSet('docker:containers', data, 4);
+        res.json(data);
     } catch (err: any) {
         res.status(500).json({ message: err.message || 'Failed to list containers' });
     }

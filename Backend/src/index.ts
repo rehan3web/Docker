@@ -19,11 +19,13 @@ import storageRoutes from './routes/storage';
 import containerMgmtRoutes, { initContainerManagement } from './routes/containerManagement';
 import domainsRoutes from './routes/domains';
 import agentRoutes from './routes/agent';
+import redisRoutes from './routes/redis';
 import { registerSshSocketHandlers } from './routes/ssh';
 import { registerDockerExecSocketHandlers } from './routes/docker';
 import { setIo } from './lib/socket';
 import { initScheduler } from './lib/schedulerService';
 import { getInfraConnection } from './lib/infraDb';
+import { initRedis, trackSession } from './lib/redis';
 
 dotenv.config();
 
@@ -85,6 +87,7 @@ app.use('/api/storage', storageRoutes);
 app.use('/api/mgmt', containerMgmtRoutes);
 app.use('/api/domains', domainsRoutes);
 app.use('/api/agent', agentRoutes);
+app.use('/api/redis', redisRoutes);
 
 // ── Socket.IO JWT handshake middleware ────────────────────────────────────────
 // Reject any socket that does not present a valid bearer token. Authenticated
@@ -115,9 +118,11 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
     const userId: string = (socket.data as any).userId;
+    const username: string = (socket.data as any).user?.username ?? userId;
     socket.join('authenticated');
     socket.join(`user:${userId}`);
     console.log(`Client connected: ${socket.id} (user=${userId})`);
+    trackSession(socket.id, username, true);
 
     registerSshSocketHandlers(socket);
     registerDockerExecSocketHandlers(socket);
@@ -127,12 +132,9 @@ io.on('connection', (socket) => {
             socket.join(`table-${tableName}`);
         }
     });
-    // Note: there is no `subscribe-deploy` handler. Deployment logs and
-    // status events are emitted exclusively to the deployment owner's
-    // private `user:<id>` room (see Backend/src/routes/deploy.ts), so a
-    // generic deploy-room subscription would only widen the attack surface.
     socket.on('disconnect', () => {
         console.log(`Client disconnected: ${socket.id} (user=${userId})`);
+        trackSession(socket.id, username, false);
     });
 });
 
@@ -148,6 +150,7 @@ const PORT = process.env.BACKEND_PORT || 3001;
 
 server.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Backend running on port ${PORT}`);
+    initRedis();
     getInfraConnection()
         .then(() => console.log('[InfraDB] Connected to dockelt_data'))
         .catch(err => console.error('[InfraDB] Init error:', err.message));
