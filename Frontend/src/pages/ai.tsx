@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
@@ -389,28 +390,62 @@ export default function AiPage() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Model</label>
-                  <select
-                    value={model || settings?.model || NVIDIA_MODELS[0].value}
-                    onChange={e => setModel(e.target.value)}
-                    className="w-full h-9 text-xs bg-background border border-border rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <optgroup label="Thinking / Reasoning">
-                      {NVIDIA_MODELS.filter(m => m.thinking).map(m => (
-                        <option key={m.value} value={m.value}>{m.label} — {m.provider}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Fast / Instruction">
-                      {NVIDIA_MODELS.filter(m => !m.thinking).map(m => (
-                        <option key={m.value} value={m.value}>{m.label} — {m.provider}</option>
-                      ))}
-                    </optgroup>
-                  </select>
-                  <p className="text-[11px] text-muted-foreground">
-                    {(() => {
-                      const sel = NVIDIA_MODELS.find(m => m.value === (model || settings?.model || NVIDIA_MODELS[0].value));
-                      return sel ? `${sel.provider} · ${sel.thinking ? "Reasoning model — shows thinking steps" : "Fast instruction-tuned model"}` : "";
-                    })()}
-                  </p>
+                  {(() => {
+                    const activeVal = model || settings?.model || NVIDIA_MODELS[0].value;
+                    const sel = NVIDIA_MODELS.find(m => m.value === activeVal) ?? NVIDIA_MODELS[0];
+                    return (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="w-full h-9 text-xs justify-between font-sans px-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="truncate">{sel.label}</span>
+                              <span className="text-muted-foreground shrink-0">{sel.provider}</span>
+                              {sel.thinking && (
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 border-primary/30 text-primary bg-primary/5">Thinking</Badge>
+                              )}
+                            </div>
+                            <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-50 ml-2" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-[340px] rounded-xl p-1.5 shadow-lg">
+                          <p className="px-2.5 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Thinking / Reasoning</p>
+                          {NVIDIA_MODELS.filter(m => m.thinking).map(m => (
+                            <DropdownMenuItem
+                              key={m.value}
+                              className="px-2.5 py-2 rounded-lg cursor-pointer gap-2 text-xs"
+                              onClick={() => setModel(m.value)}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className={cn("font-medium truncate", m.value === activeVal && "text-primary")}>{m.label}</span>
+                                  {m.value === activeVal && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+                                </div>
+                                <span className="text-muted-foreground">{m.provider}</span>
+                              </div>
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 border-primary/30 text-primary bg-primary/5">Thinking</Badge>
+                            </DropdownMenuItem>
+                          ))}
+                          <div className="my-1 border-t border-border/50" />
+                          <p className="px-2.5 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Fast / Instruction</p>
+                          {NVIDIA_MODELS.filter(m => !m.thinking).map(m => (
+                            <DropdownMenuItem
+                              key={m.value}
+                              className="px-2.5 py-2 rounded-lg cursor-pointer gap-2 text-xs"
+                              onClick={() => setModel(m.value)}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className={cn("font-medium truncate", m.value === activeVal && "text-primary")}>{m.label}</span>
+                                  {m.value === activeVal && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+                                </div>
+                                <span className="text-muted-foreground">{m.provider}</span>
+                              </div>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    );
+                  })()}
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" className="h-8 text-xs gap-1.5" onClick={handleSave} disabled={saving || !apiKey.trim()}>
