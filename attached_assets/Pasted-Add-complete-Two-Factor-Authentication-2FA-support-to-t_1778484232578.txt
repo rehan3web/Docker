@@ -1,0 +1,429 @@
+Add complete Two-Factor Authentication (2FA) support to the app.
+
+Requirements:
+
+1. Add `.env` configuration:
+
+```env
+ENABLE_2FA=true
+```
+
+Behavior:
+
+* If `ENABLE_2FA=true`
+
+  * 2FA system enabled
+  * Setup flow enabled
+  * Login verification enabled
+  * Settings tab visible
+* If `ENABLE_2FA=false`
+
+  * Entire 2FA system disabled
+  * No OTP verification
+  * No setup screen
+  * Hide 2FA tab
+  * Existing DB values ignored
+
+Backend restart required after `.env` changes.
+
+---
+
+First-Time Setup Flow:
+
+After successful login:
+
+Conditions:
+
+* ENABLE_2FA=true
+* user.twoFactorEnabled=false
+
+Then immediately show a quick setup panel/modal:
+
+# 2FA Setup
+
+Options:
+
+* Setup with QR Code
+* Setup with Manual Key
+
+Generate TOTP secret and QR.
+
+QR format:
+
+```text
+otpauth://totp/AppName:user@email.com?secret=SECRET&issuer=AppName
+```
+
+Show:
+
+* QR Code
+* Manual secret key
+* Copy button
+
+Compatible with:
+
+* Google Authenticator
+* Authy
+* Microsoft Authenticator
+* 1Password
+
+---
+
+Verification Step:
+
+User enters:
+aAdd automatic RailPack build support.
+
+Requirements:
+
+# Build System Logic
+
+When repository is cloned:
+
+## Step 1
+
+Check if `Dockerfile` exists.
+
+If Dockerfile exists:
+
+* use normal Docker build
+* do NOT use RailPack
+
+Example:
+
+```text id="f1"
+Dockerfile found
+→ docker build
+```
+
+---
+
+If Dockerfile does NOT exist:
+
+* automatically use RailPack build system
+* auto detect runtime/framework
+* generate build image automatically
+
+Example:
+
+```text id="f2"
+No Dockerfile found
+→ RailPack build
+```
+
+Supported auto detection:
+
+* Node.js
+* Next.js
+* Python
+* Go
+* Rust
+* PHP
+* Bun
+* Static apps
+
+---
+
+# Queue Based Build System
+
+Do NOT allow unlimited parallel builds.
+
+Add centralized queue-based build architecture.
+
+Requirements:
+
+* build queue
+* worker system
+* retry support
+* build status tracking
+* queued/building/success/failed states
+* prevent server overload
+
+Architecture:
+
+```text id="f3"
+Deploy Request
+      ↓
+Redis Queue / MQ
+      ↓
+Build Worker
+      ↓
+Docker Build OR RailPack Build
+      ↓
+Deploy
+```
+
+---
+
+# Multiple Builds
+
+Support:
+
+* multiple queued builds
+* controlled concurrency
+* configurable max parallel builds
+
+Example:
+
+```env id="f4"
+MAX_PARALLEL_BUILDS=3
+```
+
+---
+
+# Redis Live Build Logs Cache
+
+Add Redis-based live log caching.
+
+Requirements:
+
+* realtime build logs
+* websocket/SSE streaming
+* logs survive frontend refresh/reload
+* instant log restore from Redis
+* quick refresh within seconds
+
+Architecture:
+
+```text id="f5"
+Build Worker
+   ↓
+Redis Logs Cache
+   ↓
+WebSocket
+   ↓
+Frontend Live Logs
+```
+
+Store:
+
+```text id="f6"
+build:{id}:logs
+build:{id}:status
+build:{id}:stream
+```
+
+Use:
+
+* Redis Lists
+* Redis Pub/Sub
+
+---
+
+# Auto Deploy Tab
+
+In Auto Deploy tab:
+
+* use MQ/queue system
+* background deployments
+* deployment retries
+* deployment history
+* deployment status updates
+* live deployment logs
+
+Recommended:
+
+* BullMQ
+* Redis Queue
+* RabbitMQ (optional)
+
+---
+
+# Build Worker Responsibilities
+
+Worker must:
+
+* clone repository
+* detect Dockerfile
+* run Docker or RailPack build
+* stream logs live
+* cache logs in Redis
+* push image
+* deploy container
+* update deployment status
+
+---
+
+# Recommended Stack
+
+Node.js Libraries:
+
+* bullmq
+* ioredis
+* ws/socket.io
+
+---
+
+# Important Rules
+
+* RailPack ONLY used when Dockerfile missing
+* Dockerfile always takes priority
+* Queue system mandatory
+* Live logs must persist after frontend reload
+* Build workers isolated from main API
+* Prevent unlimited concurrent builds
+
+```text
+6-digit OTP
+```
+
+Backend verifies token.
+
+If valid:
+
+* save encrypted secret
+* set:
+
+```text
+user.twoFactorEnabled=true
+```
+
+Store in DB.
+
+Show success message:
+
+```text
+2FA Enabled Successfully
+```
+
+---
+
+Database:
+
+Add fields:
+
+```sql
+ALTER TABLE users
+ADD COLUMN two_factor_enabled BOOLEAN DEFAULT false,
+ADD COLUMN two_factor_secret TEXT NULL;
+```
+
+---
+
+Login Flow:
+
+If:
+
+* ENABLE_2FA=true
+* user.twoFactorEnabled=true
+
+Then after password verification:
+
+Show:
+
+# Two-Factor Verification
+
+Input:
+
+* 6-digit OTP
+
+If valid:
+
+* create session
+* issue JWT/cookie
+* complete login
+
+If invalid:
+
+* show invalid code error
+
+---
+
+Forgot 2FA:
+
+Add global reset method similar to SSH reset behavior.
+
+Flow:
+
+1. Change:
+
+```env
+ENABLE_2FA=false
+```
+
+2. Restart backend
+
+Result:
+
+* all users bypass 2FA
+* users can login normally
+* existing secrets ignored
+
+If later:
+
+```env
+ENABLE_2FA=true
+```
+
+Then users without active setup must configure 2FA again.
+
+---
+
+Change 2FA:
+
+Add option:
+
+# Change 2FA
+
+Flow:
+
+* verify existing password
+* generate new secret
+* regenerate QR
+* verify new OTP
+* replace old secret
+
+---
+
+Settings UI:
+
+Current:
+
+```text
+Settings
+Manage your database connections and configuration.
+```
+
+Add new upper tab:
+
+```text
+[ Database ] [ 2FA ]
+```
+
+2FA page states:
+
+If disabled globally:
+
+```text
+Two-Factor Authentication Disabled
+```
+
+If enabled but not configured:
+
+```text
+Setup 2FA
+```
+
+If already enabled:
+
+* 2FA Enabled
+* Regenerate QR
+* Change 2FA
+* Disable 2FA
+
+---
+
+Recommended libraries:
+
+Node.js:
+
+* speakeasy or otplib
+* qrcode
+
+Security:
+
+* encrypt secrets before DB storage
+* add OTP rate limiting
+* add retry protection
+* add audit logs
+* optional backup recovery codes
