@@ -135,11 +135,22 @@ const MISE_VERSION      = '2026.3.17';
 const MISE_RAILPACK_DIR = '/tmp/railpack/mise';
 const MISE_RAILPACK_BIN = path.join(MISE_RAILPACK_DIR, `mise-${MISE_VERSION}`);
 
-// Detect host architecture for binary selection
+// Detect host architecture + libc for binary selection.
+// Alpine uses musl libc — the glibc binary fails with "no such file or directory"
+// because /lib64/ld-linux-x86-64.so.2 (the ELF interpreter) doesn't exist.
+// Railpack itself ships as a musl binary and downloads the musl mise variant on Alpine.
+function isMusl(): boolean {
+    try {
+        // musl systems expose their dynamic linker at a well-known path
+        return fs.existsSync('/lib/ld-musl-x86_64.so.1') ||
+               fs.existsSync('/lib/ld-musl-aarch64.so.1');
+    } catch { return false; }
+}
+
 function hostArch(): string {
-    const a = process.arch;
-    if (a === 'arm64') return 'linux-arm64';
-    return 'linux-x64';
+    const cpu  = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const libc = isMusl() ? '-musl' : '';
+    return `linux-${cpu}${libc}`;   // e.g. linux-x64-musl on Alpine
 }
 
 function railpackInPath(): boolean {
@@ -185,9 +196,18 @@ function blogLog(id: string, msg: string) {
 // Pre-seed mise at the exact path railpack expects.
 // /tmp is ephemeral so this must run before each railpack build.
 async function ensureMise(id: string): Promise<void> {
+    // If the file exists, verify it can actually execute (guards against a cached
+    // glibc binary on a musl/Alpine host — exec fails with "no such file or directory"
+    // because the ELF interpreter /lib64/ld-linux-x86-64.so.2 is missing).
     if (fs.existsSync(MISE_RAILPACK_BIN)) {
-        blogLog(id, `mise ${MISE_VERSION} ready`);
-        return;
+        try {
+            execSync(`"${MISE_RAILPACK_BIN}" --version`, { stdio: 'pipe', timeout: 5000 });
+            blogLog(id, `mise ${MISE_VERSION} ready`);
+            return;
+        } catch {
+            blogLog(id, `Cached mise binary failed exec test (libc mismatch?) — re-downloading...`);
+            try { fs.unlinkSync(MISE_RAILPACK_BIN); } catch { /* ignore */ }
+        }
     }
 
     const arch    = hostArch();
@@ -205,6 +225,15 @@ async function ensureMise(id: string): Promise<void> {
     try {
         await downloadFile(miseUrl, MISE_RAILPACK_BIN);
         fs.chmodSync(MISE_RAILPACK_BIN, 0o755);
+        // Verify the freshly downloaded binary is executable on this host
+        try {
+            execSync(`"${MISE_RAILPACK_BIN}" --version`, { stdio: 'pipe', timeout: 5000 });
+        } catch (verifyErr: any) {
+            blogLog(id, `ERROR: mise binary exec test failed after download: ${verifyErr.message}`);
+            blogLog(id, `arch=${arch} — check that mise releases include a ${arch} variant`);
+            try { fs.unlinkSync(MISE_RAILPACK_BIN); } catch { /* partial file */ }
+            return;
+        }
         const sizeMB = (fs.statSync(MISE_RAILPACK_BIN).size / 1_048_576).toFixed(1);
         blogLog(id, `mise ${MISE_VERSION} ready (${sizeMB} MB) at ${MISE_RAILPACK_BIN}`);
     } catch (err: any) {

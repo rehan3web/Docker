@@ -1,0 +1,32 @@
+Cloning https://github.com/javascriptbear/todo_react_app into /usr/src/app/.docklet-deploys/todo-react-app-dep_1778486702266_qaeing
+
+$ git clone --depth 1 https://github.com/javascriptbear/todo_react_app /usr/src/app/.docklet-deploys/todo-react-app-dep_1778486702266_qaeing
+Cloning into '/usr/src/app/.docklet-deploys/todo-react-app-dep_1778486702266_qaeing'...
+
+No Dockerfile found → using RailPack auto-detect build
+Downloading mise 2026.3.17 (linux-x64)...
+mise 2026.3.17 ready (83.8 MB) at /tmp/railpack/mise/mise-2026.3.17
+Installing railpack v0.23.0...
+railpack v0.23.0 installed
+
+RailPack auto-detecting runtime and building image docklet-todo-react-app-dep_1778486702266_qaeing...
+
+$ railpack build --name docklet-todo-react-app-dep_1778486702266_qaeing --progress plain .
+ INFO No package manager inferred, using npm default
+                   
+╭─────────────────╮
+│ Railpack 0.23.0 │
+╰─────────────────╯
+
+  ↳ Detected Node
+  ↳ Using npm package manager
+  ⚠ Failed to get package versions from mise: failed to get package versions: failed to run mise command '/tmp/railpack/mise/mise-2026.3.17 --cd /usr/src/app/.docklet-deploys/todo-react-app-dep_1778486702266_qaeing list --current --json': fork/exec /tmp/railpack/mise/mise-2026.3.17: no such file or directory
+                                                                                                                                                                                                                                                                                                                     
+                                                                                                                                                                                                                                                                                                                     
+                                                                                                                                                                                                                                                                                                                     
+  ↳ Deploying as CRA static site
+  ↳ Output directory: build
+  ✖ Failed to run mise command '/tmp/railpack/mise/mise-2026.3.17 latest node@22': fork/exec /tmp/railpack/mise/mise-2026.3.17: no such file or directory
+  
+  
+  
