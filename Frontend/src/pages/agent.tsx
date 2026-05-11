@@ -43,6 +43,12 @@ interface StructuredResult {
     sections: LogSection[];
 }
 
+interface ConfirmRequest {
+    agentId: string;
+    title: string;
+    message: string;
+}
+
 interface AgentTask {
     id: string;
     intent: string;
@@ -624,6 +630,66 @@ function BottomSheet({ open, title, icon, onClose, children }: {
     );
 }
 
+// ── Destructive-action confirmation modal ─────────────────────────────────────
+
+function AgentConfirmModal({
+    request,
+    onConfirm,
+    onCancel,
+    loading,
+}: {
+    request: ConfirmRequest;
+    onConfirm: () => void;
+    onCancel: () => void;
+    loading: boolean;
+}) {
+    return (
+        /* Backdrop */
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-background shadow-2xl overflow-hidden">
+                {/* Header */}
+                <div className="flex items-start gap-3 px-5 pt-5 pb-4 border-b border-destructive/20 bg-destructive/5">
+                    <div className="p-2 rounded-lg bg-destructive/10 border border-destructive/20 shrink-0">
+                        <AlertTriangle className="w-5 h-5 text-destructive" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground">{request.title}</p>
+                        <p className="text-[11px] text-destructive font-medium mt-0.5">Agent paused — waiting for your decision</p>
+                    </div>
+                </div>
+
+                {/* Body */}
+                <div className="px-5 py-4">
+                    <div className="text-sm text-foreground/90 whitespace-pre-line leading-relaxed">
+                        {request.message}
+                    </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 px-5 pb-5">
+                    <Button
+                        variant="outline"
+                        className="flex-1 h-9 gap-2 border-border text-muted-foreground hover:text-foreground"
+                        onClick={onCancel}
+                        disabled={loading}
+                    >
+                        <X className="w-3.5 h-3.5" />Cancel — keep existing
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        className="flex-1 h-9 gap-2"
+                        onClick={onConfirm}
+                        disabled={loading}
+                    >
+                        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        Yes, proceed
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ── Structured result view ────────────────────────────────────────────────────
 
 const TASK_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
@@ -1023,6 +1089,8 @@ export default function AgentPage() {
     const [historyKey, setHistoryKey]       = useState(0);
     const [openSheet, setOpenSheet]         = useState<Sheet>(null);
     const [structuredResult, setStructuredResult] = useState<StructuredResult | null>(null);
+    const [confirmRequest, setConfirmRequest]     = useState<ConfirmRequest | null>(null);
+    const [confirmLoading, setConfirmLoading]     = useState(false);
 
     const textareaRef  = useRef<HTMLTextAreaElement>(null);
     const currentAgent = useRef<string | null>(null);
@@ -1050,13 +1118,19 @@ export default function AgentPage() {
                 sections: data.sections,
             });
         };
+        const onConfirmRequired = (data: { agentId: string; title: string; message: string }) => {
+            if (currentAgent.current && data.agentId !== currentAgent.current) return;
+            setConfirmRequest({ agentId: data.agentId, title: data.title, message: data.message });
+        };
         socket.on("agent:log", onLog);
         socket.on("agent:done", onDone);
         socket.on("agent:structured_result", onStructured);
+        socket.on("agent:confirm_required", onConfirmRequired);
         return () => {
             socket.off("agent:log", onLog);
             socket.off("agent:done", onDone);
             socket.off("agent:structured_result", onStructured);
+            socket.off("agent:confirm_required", onConfirmRequired);
         };
     }, []);
 
@@ -1110,6 +1184,19 @@ export default function AgentPage() {
         setTimeout(() => textareaRef.current?.focus(), 50);
     }, []);
 
+    const sendConfirm = useCallback(async (confirmed: boolean) => {
+        if (!confirmRequest) return;
+        setConfirmLoading(true);
+        try {
+            await apiFetch("/agent/confirm", {
+                method: "POST",
+                body: JSON.stringify({ agentId: confirmRequest.agentId, confirmed }),
+            });
+        } catch { /* non-fatal */ }
+        setConfirmLoading(false);
+        setConfirmRequest(null);
+    }, [confirmRequest]);
+
     const chatProps = {
         logs, running, dockerMissing, onInstallDocker: installDocker,
         prompt, setPrompt, onRun: run, onCancel: cancel,
@@ -1119,6 +1206,14 @@ export default function AgentPage() {
 
     return (
         <div className="min-h-screen bg-background text-foreground flex">
+            {confirmRequest && (
+                <AgentConfirmModal
+                    request={confirmRequest}
+                    onConfirm={() => sendConfirm(true)}
+                    onCancel={() => sendConfirm(false)}
+                    loading={confirmLoading}
+                />
+            )}
             <DesktopSidebar />
 
             <div className="flex-1 flex flex-col min-w-0">

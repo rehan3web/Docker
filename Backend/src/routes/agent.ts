@@ -600,6 +600,43 @@ function streamCommand(
     });
 }
 
+// ── Destructive-action confirmation gate ──────────────────────────────────────
+
+const pendingConfirms = new Map<string, (confirmed: boolean) => void>();
+
+/** Returns true if the container name sounds like it holds persistent data */
+function isDataContainer(name: string): boolean {
+    return /postgres|mysql|mongo|redis|mariadb|elastic|cassandra|rabbit|kafka|minio|influx|neo4j|couch|cockroach|timescale|clickhouse|meili|typesense|dynamo|sqlite|db|database/.test(
+        name.toLowerCase()
+    );
+}
+
+/** Returns true if docker inspect says the container exists (running OR stopped) */
+function containerExists(name: string): boolean {
+    try {
+        execSync(`docker inspect ${name}`, { stdio: 'pipe', timeout: 5_000 });
+        return true;
+    } catch { return false; }
+}
+
+/**
+ * Pause agent execution and ask the user for confirmation via the socket.
+ * Resolves to true (proceed) or false (skip/cancel).
+ * Auto-cancels after 10 minutes with no response.
+ */
+function awaitConfirm(userId: string, agentId: string, title: string, message: string): Promise<boolean> {
+    return new Promise(resolve => {
+        pendingConfirms.set(agentId, resolve);
+        emitToUser(userId, 'agent:confirm_required', { agentId, title, message });
+        setTimeout(() => {
+            if (pendingConfirms.has(agentId)) {
+                pendingConfirms.delete(agentId);
+                resolve(false);
+            }
+        }, 10 * 60 * 1000);
+    });
+}
+
 // ── Step executor (returns log + whether it hard-failed) ─────────────────────
 
 type ExecResult = { failed: boolean; log: string };
@@ -678,6 +715,22 @@ async function executeSteps(
         }
 
         if (step.type === 'docker_remove') {
+            // Gate: ask user before removing any data container that actually exists
+            if (isDataContainer(step.container) && containerExists(step.container)) {
+                emitToUser(userId, 'agent:log', { agentId, type: 'info',
+                    content: `"${step.container}" appears to hold data — waiting for your confirmation before removing it.` });
+                const confirmed = await awaitConfirm(
+                    userId, agentId,
+                    `Remove "${step.container}"?`,
+                    `The container "${step.container}" already exists and may contain database data.\n\nRemoving it will permanently delete any data not stored in a named volume.\n\nDo you want the agent to remove it and continue?`
+                );
+                if (!confirmed) {
+                    emitToUser(userId, 'agent:log', { agentId, type: 'info',
+                        content: `Skipped removal of "${step.container}" — cancelled by user.` });
+                    if (!step.continueOnError) return { failed: false, log: logLines.join('\n') };
+                    continue;
+                }
+            }
             cmd(`docker rm -f ${step.container}`);
             const res = await streamCommand('docker', ['rm', '-f', step.container], userId, agentId, logLines);
             if (res.exitCode !== 0 && !step.continueOnError) {
@@ -729,6 +782,21 @@ async function executeSteps(
                 const ni = safeArgs.indexOf('--name');
                 if (ni !== -1 && safeArgs[ni + 1]) {
                     const name = safeArgs[ni + 1];
+                    // Gate: never silently remove a data container
+                    if (isDataContainer(name) && containerExists(name)) {
+                        emitToUser(userId, 'agent:log', { agentId, type: 'info',
+                            content: `"${name}" is already running and may contain data — waiting for your confirmation before replacing it.` });
+                        const confirmed = await awaitConfirm(
+                            userId, agentId,
+                            `"${name}" is already running`,
+                            `A container named "${name}" is already running and likely contains database data.\n\nThe agent wants to stop and remove it so the new instance can start.\n\nIf you cancel, the new container will not be started. If you want to keep both, install the new one on a different port.`
+                        );
+                        if (!confirmed) {
+                            emitToUser(userId, 'agent:log', { agentId, type: 'info',
+                                content: `Cancelled — "${name}" was not replaced. The existing container is still running.` });
+                            continue; // skip this docker_run step entirely
+                        }
+                    }
                     info(`Container "${name}" exists — removing and retrying…`);
                     await streamCommand('docker', ['rm', '-f', name], userId, agentId, logLines);
                     res = await streamCommand('docker', ['run', ...safeArgs], userId, agentId, logLines);
@@ -1636,6 +1704,16 @@ router.post('/run', authenticateToken, async (req, res) => {
             : (err?.message || 'Agent failed');
         return res.status(status === 401 || status === 403 ? 400 : status).json({ message: msg });
     }
+});
+
+router.post('/confirm', authenticateToken, async (req, res) => {
+    const { agentId, confirmed } = req.body as { agentId: string; confirmed: boolean };
+    const resolve = pendingConfirms.get(agentId);
+    if (resolve) {
+        pendingConfirms.delete(agentId);
+        resolve(confirmed === true);
+    }
+    res.json({ ok: true });
 });
 
 router.post('/cancel', authenticateToken, async (req, res) => {
