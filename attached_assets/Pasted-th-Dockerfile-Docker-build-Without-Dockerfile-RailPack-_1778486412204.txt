@@ -1,0 +1,43 @@
+th Dockerfile → Docker build. Without Dockerfile → RailPack auto-detect (Node, Python, Go, Rust, PHP, Bun, static…).
+https://github.com/javascriptbear/todo_react_app
+Deploy
+Live Logs
+Deployment 1_11t246 — logs restore from cache on reload
+RailPack
+failed
+
+No Dockerfile found → using RailPack auto-detect build
+Ensuring railpack and mise are available...
+
+RailPack auto-detecting runtime and building image docklet-todo-react-app-dep_1778486393811_11t246...
+
+$ railpack build --name docklet-todo-react-app-dep_1778486393811_11t246 --progress plain .
+ INFO No package manager inferred, using npm default
+                   
+╭─────────────────╮
+│ Railpack 0.23.0 │
+╰─────────────────╯
+
+  ↳ Detected Node
+  ↳ Using npm package manager
+  ⚠ Failed to get package versions from mise: failed to get package versions: failed to run mise command '/tmp/railpack/mise/mise-2026.3.17 --cd /usr/src/app/.docklet-deploys/todo-react-app-dep_1778486393811_11t246 list --current --json': fork/exec /tmp/railpack/mise/mise-2026.3.17: no such file or directory
+                                                                                                                                                                                                                                                                                                                     
+                                                                                                                                                                                                                                                                                                                     
+                                                                                                                                                                                                                                                                                                                     
+  ↳ Deploying as CRA static site
+  ↳ Output directory: build
+  ✖ Failed to run mise command '/tmp/railpack/mise/mise-2026.3.17 latest node@22': fork/exec /tmp/railpack/mise/mise-2026.3.17: no such file or directory
+  
+  
+  
+
+
+Deploy History
+Click a deployment to restore its logs
+
+todo-react-app
+RailPack
+failed
+https://github.com/javascriptbear/todo_react_app
+
+May 11, 00:59:53

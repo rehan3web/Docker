@@ -1,0 +1,46 @@
+root@root:~/Docker# git pull && docker compose -f postgres.yml up -d --build docklet-server
+remote: Enumerating objects: 11, done.
+remote: Counting objects: 100% (11/11), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 6 (delta 4), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (6/6), 742 bytes | 371.00 KiB/s, done.
+From https://github.com/rehan3web/Docker
+   134adf4..05c63b3  main       -> origin/main
+Updating 134adf4..05c63b3
+Fast-forward
+ Backend/src/lib/buildQueue.ts | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+[+] Building 10.5s (14/14) FINISHED                                                                                    
+ => [internal] load local bake definitions                                                                        0.0s
+ => => reading from stdin 524B                                                                                    0.0s
+ => [internal] load build definition from Dockerfile                                                              0.0s
+ => => transferring dockerfile: 280B                                                                              0.0s
+ => [internal] load metadata for docker.io/library/node:20-alpine                                                 0.5s
+ => [internal] load .dockerignore                                                                                 0.0s
+ => => transferring context: 87B                                                                                  0.0s
+ => [1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f60  0.0s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f60  0.0s
+ => [internal] load build context                                                                                 0.0s
+ => => transferring context: 21.33kB                                                                              0.0s
+ => CACHED [2/7] RUN apk add --no-cache postgresql-client docker-cli docker-compose bash git util-linux           0.0s
+ => CACHED [3/7] WORKDIR /usr/src/app                                                                             0.0s
+ => CACHED [4/7] COPY package*.json ./                                                                            0.0s
+ => CACHED [5/7] RUN npm install                                                                                  0.0s
+ => [6/7] COPY . .                                                                                                0.0s
+ => [7/7] RUN npm run build                                                                                       9.4s
+ => exporting to image                                                                                            0.3s 
+ => => exporting layers                                                                                           0.1s 
+ => => exporting manifest sha256:c7c0fc47b6e44e8a321a5fb984c0e175a04ba47a2edc770d499f0e4ba60b9169                 0.0s
+ => => exporting config sha256:1cd87d65e8ea36c2e1bf59e8804883f2ce7b9331e86d7403ba5fa687e1d75918                   0.0s
+ => => exporting attestation manifest sha256:77c3983cfb7ce0b118a6fd78d3aed288d0d6335c89c34f2ebb0df9a4b4bece9b     0.0s
+ => => exporting manifest list sha256:59940be3b568287eea3646d6df653d438cc8501d6b4c81a667202e5d281ebafb            0.0s
+ => => naming to docker.io/library/docklet-docklet-server:latest                                                  0.0s
+ => => unpacking to docker.io/library/docklet-docklet-server:latest                                               0.1s
+ => resolving provenance for metadata file                                                                        0.0s
+[+] up 5/5
+ ✔ Image docklet-docklet-server Built                                                                             10.5s
+ ✔ Container docklet-db         Healthy                                                                            1.1s
+ ✔ Container docklet-redis      Healthy                                                                            1.6s
+ ✔ Container docklet-pooler     Running                                                                            0.0s
+ ✔ Container docklet-server     Started                                                                            1.8s
+root@root:~/Docker# 

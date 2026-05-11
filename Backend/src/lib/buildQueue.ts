@@ -128,89 +128,122 @@ function runStreamed(id: string, command: string, args: string[], cwd: string): 
 // finds it without needing to download it itself.
 
 const RAILPACK_VERSION  = 'v0.23.0';
-const RAILPACK_URL      = `https://github.com/railwayapp/railpack/releases/download/${RAILPACK_VERSION}/railpack-${RAILPACK_VERSION}-x86_64-unknown-linux-musl.tar.gz`;
-const RAILPACK_INSTALL  = path.join(process.env.HOME || '/home/runner', '.local', 'bin');
+const RAILPACK_INSTALL  = path.join(process.env.HOME || '/root', '.local', 'bin');
 
-// Exact mise version railpack v0.23.0 expects and the path it looks for it at
+// Exact mise version railpack v0.23.0 expects and the path it checks
 const MISE_VERSION      = '2026.3.17';
-const MISE_URL          = `https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64`;
 const MISE_RAILPACK_DIR = '/tmp/railpack/mise';
 const MISE_RAILPACK_BIN = path.join(MISE_RAILPACK_DIR, `mise-${MISE_VERSION}`);
+
+// Detect host architecture for binary selection
+function hostArch(): string {
+    const a = process.arch;
+    if (a === 'arm64') return 'linux-arm64';
+    return 'linux-x64';
+}
 
 function railpackInPath(): boolean {
     try { execSync('railpack --version', { stdio: 'ignore', env: process.env }); return true; } catch { return false; }
 }
 
+// Download via wget (reliable in Alpine + most Linux distros); fallback to Node https
 function downloadFile(url: string, dest: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const follow = (u: string) => {
-            https.get(u, (res) => {
-                if (res.statusCode === 301 || res.statusCode === 302) { follow(res.headers.location!); return; }
-                if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode} for ${u}`)); return; }
-                const file = createWriteStream(dest);
-                res.pipe(file);
-                file.on('finish', () => file.close(() => resolve()));
-                file.on('error', reject);
-            }).on('error', reject);
-        };
-        follow(url);
-    });
+    // Try wget first — handles redirects, SSL, and large files correctly
+    try {
+        execSync(`wget -q --show-progress -O "${dest}" "${url}" 2>&1`, { stdio: 'pipe', timeout: 120_000 });
+        const size = fs.statSync(dest).size;
+        if (size < 1024) throw new Error(`wget produced suspiciously small file (${size} bytes)`);
+        return Promise.resolve();
+    } catch (wgetErr: any) {
+        // Fallback: Node https with redirect following
+        return new Promise((resolve, reject) => {
+            const follow = (u: string, depth = 0) => {
+                if (depth > 5) { reject(new Error('Too many redirects')); return; }
+                https.get(u, (res) => {
+                    if ([301, 302, 303, 307, 308].includes(res.statusCode!)) {
+                        res.resume(); follow(res.headers.location!, depth + 1); return;
+                    }
+                    if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode} for ${u}`)); return; }
+                    const file = createWriteStream(dest);
+                    res.pipe(file);
+                    file.on('finish', () => file.close(() => resolve()));
+                    file.on('error', reject);
+                    res.on('error', reject);
+                }).on('error', reject);
+            };
+            follow(url);
+        });
+    }
 }
 
-// Pre-seed mise at the exact path railpack expects — runs every startup
-// since /tmp is ephemeral and gets wiped on reboots/container restarts.
-async function ensureMise(): Promise<void> {
+// Build-time helper: logs to both console and deploy log stream
+function blogLog(id: string, msg: string) {
+    console.log(`[BuildQueue] ${msg}`);
+    emitLog(id, 'system', msg + '\n');
+}
+
+// Pre-seed mise at the exact path railpack expects.
+// /tmp is ephemeral so this must run before each railpack build.
+async function ensureMise(id: string): Promise<void> {
     if (fs.existsSync(MISE_RAILPACK_BIN)) {
-        console.log(`[BuildQueue] mise ${MISE_VERSION} already seeded`);
+        blogLog(id, `mise ${MISE_VERSION} ready`);
         return;
     }
-    console.log(`[BuildQueue] seeding mise ${MISE_VERSION} for railpack...`);
-    try {
-        // /tmp/railpack might exist as a file (e.g. a previously extracted binary).
-        // Remove it so we can create the directory tree.
-        const rpTmp = '/tmp/railpack';
-        try {
-            const st = fs.statSync(rpTmp);
-            if (!st.isDirectory()) fs.unlinkSync(rpTmp);
-        } catch { /* doesn't exist — fine */ }
 
-        fs.mkdirSync(MISE_RAILPACK_DIR, { recursive: true });
-        await downloadFile(MISE_URL, MISE_RAILPACK_BIN);
+    const arch    = hostArch();
+    const miseUrl = `https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-${arch}`;
+    blogLog(id, `Downloading mise ${MISE_VERSION} (${arch})...`);
+
+    // /tmp/railpack might be a stale file from a previous extraction — remove it
+    try {
+        const st = fs.statSync('/tmp/railpack');
+        if (!st.isDirectory()) { fs.unlinkSync('/tmp/railpack'); blogLog(id, 'Removed stale /tmp/railpack file'); }
+    } catch { /* doesn't exist — fine */ }
+
+    fs.mkdirSync(MISE_RAILPACK_DIR, { recursive: true });
+
+    try {
+        await downloadFile(miseUrl, MISE_RAILPACK_BIN);
         fs.chmodSync(MISE_RAILPACK_BIN, 0o755);
-        console.log(`[BuildQueue] mise ${MISE_VERSION} seeded at ${MISE_RAILPACK_BIN}`);
+        const sizeMB = (fs.statSync(MISE_RAILPACK_BIN).size / 1_048_576).toFixed(1);
+        blogLog(id, `mise ${MISE_VERSION} ready (${sizeMB} MB) at ${MISE_RAILPACK_BIN}`);
     } catch (err: any) {
-        console.warn(`[BuildQueue] mise seed failed: ${err.message}`);
+        blogLog(id, `ERROR: mise download failed — ${err.message}`);
+        try { fs.unlinkSync(MISE_RAILPACK_BIN); } catch { /* partial file */ }
     }
 }
 
-async function ensureRailpack(): Promise<void> {
-    // Always ensure mise is seeded (idempotent — skips if already present)
-    await ensureMise();
+async function ensureRailpack(id: string): Promise<void> {
+    // Seed mise before checking/installing railpack
+    await ensureMise(id);
 
     if (railpackInPath()) {
-        console.log('[BuildQueue] railpack already installed');
+        blogLog(id, 'railpack already installed');
         return;
     }
-    console.log('[BuildQueue] railpack not found — auto-installing...');
+
+    const arch        = hostArch();
+    const railpackUrl = `https://github.com/railwayapp/railpack/releases/download/${RAILPACK_VERSION}/railpack-${RAILPACK_VERSION}-x86_64-unknown-linux-musl.tar.gz`;
+    blogLog(id, `Installing railpack ${RAILPACK_VERSION}...`);
+
     try {
         fs.mkdirSync(RAILPACK_INSTALL, { recursive: true });
         const tarPath = path.join(RAILPACK_INSTALL, 'railpack.tar.gz');
-        await downloadFile(RAILPACK_URL, tarPath);
-        execSync(`tar -xzf "${tarPath}" -C "${RAILPACK_INSTALL}"`, { stdio: 'inherit' });
+        await downloadFile(railpackUrl, tarPath);
+        execSync(`tar -xzf "${tarPath}" -C "${RAILPACK_INSTALL}"`, { stdio: 'pipe' });
         fs.unlinkSync(tarPath);
         fs.chmodSync(path.join(RAILPACK_INSTALL, 'railpack'), 0o755);
 
-        // Ensure install dir is in process.env.PATH for all future spawns
         const cur = process.env.PATH || '';
         if (!cur.includes(RAILPACK_INSTALL)) process.env.PATH = `${RAILPACK_INSTALL}:${cur}`;
 
         if (railpackInPath()) {
-            console.log(`[BuildQueue] railpack ${RAILPACK_VERSION} installed successfully`);
+            blogLog(id, `railpack ${RAILPACK_VERSION} installed`);
         } else {
-            console.warn('[BuildQueue] railpack install completed but binary still not found in PATH');
+            blogLog(id, 'ERROR: railpack install completed but binary not found in PATH');
         }
     } catch (err: any) {
-        console.warn('[BuildQueue] railpack auto-install failed:', err.message);
+        blogLog(id, `ERROR: railpack install failed — ${err.message}`);
     }
 }
 
@@ -300,8 +333,7 @@ async function runBuild(id: string) {
             emitLog(id, 'system', '\nNo Dockerfile found → using RailPack auto-detect build\n');
 
             // Ensure railpack binary + mise are ready (build-time only — not at startup)
-            emitLog(id, 'system', 'Ensuring railpack and mise are available...\n');
-            await ensureRailpack();
+            await ensureRailpack(id);
 
             if (!railpackInPath()) {
                 record.error = 'railpack not available — install failed';
