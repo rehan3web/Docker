@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock, Database, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock, Database, ShieldCheck, Sparkles, Zap, Bot } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -116,6 +116,7 @@ const navItems: NavItem[] = [
     { label: "Storage", icon: <Database className="w-4 h-4" strokeWidth={1.5} />, href: "/storage" },
     { label: "Redis Cache", icon: <Zap className="w-4 h-4" strokeWidth={1.5} />, href: "/redis" },
     { label: "AI", icon: <Sparkles className="w-4 h-4" strokeWidth={1.5} />, href: "/ai" },
+    { label: "DevOps Agent", icon: <Bot className="w-4 h-4" strokeWidth={1.5} />, href: "/agent" },
 ];
 
 function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
@@ -172,6 +173,7 @@ function SidebarNav({ onSelect }: { onSelect?: () => void }) {
             <div className="h-px bg-border/50 my-2 mx-2" />
 
             <NavLink item={navItems[16]} onSelect={onSelect} />
+            <NavLink item={navItems[17]} onSelect={onSelect} />
         </nav>
     );
 }

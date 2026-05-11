@@ -5,6 +5,10 @@ import { authenticateToken } from '../middleware/auth';
 import { getSetting } from '../lib/settings';
 import { emitToUser } from '../lib/socket';
 import { getConnection } from '../lib/db';
+import {
+    initAgentDb, createTask, finishTask, listTasks, getTask,
+    recordKnowledge, listKnowledge, deleteKnowledge, getRelevantKnowledge,
+} from '../lib/agentDb';
 
 const router = express.Router();
 
@@ -1298,6 +1302,10 @@ function getServiceRecipePlan(message: string): ServiceRecipe | null {
     return null;
 }
 
+// ── Init DB on module load ────────────────────────────────────────────────────
+
+initAgentDb().catch(err => console.warn('[AgentDB] Init warning:', err.message));
+
 // ── ReAct loop (Plan → Execute → Verify → Fix → Verify …) ────────────────────
 
 async function runAgentLoop(
@@ -1308,125 +1316,135 @@ async function runAgentLoop(
     model: string
 ): Promise<void> {
     clearCancel(agentId);
-    const loopStart = Date.now();
+    const loopStart  = Date.now();
+    const allLogLines: string[] = [];
+    let   retryCount = 0;
+
+    // Persist task record immediately
+    await createTask(agentId, message);
+
+    // Helper: intercept emitToUser so we can also accumulate for persistence
+    const emit = (type: string, content: string) => {
+        allLogLines.push(`[${type}] ${content}`);
+        emitToUser(userId, 'agent:log', { agentId, type, content });
+    };
+
+    async function done(success: boolean, summary: string) {
+        await finishTask(agentId, success, summary, allLogLines, retryCount);
+        emitToUser(userId, 'agent:done', { agentId, success, summary });
+        // Store knowledge on success
+        if (success) {
+            const key = message.toLowerCase().replace(/[^a-z0-9 ]/g, '').slice(0, 80);
+            await recordKnowledge(
+                key,
+                message.slice(0, 200),
+                summary,
+                []
+            ).catch(() => { /* non-fatal */ });
+        }
+    }
 
     function timedOut(): boolean {
         if (isCancelled(agentId)) {
-            emitToUser(userId, 'agent:log', { agentId, type: 'error', content: 'Agent stopped by user.' });
+            emit('error', 'Agent stopped by user.');
             return true;
         }
         if (Date.now() - loopStart > LOOP_TIMEOUT_MS) {
-            emitToUser(userId, 'agent:log', {
-                agentId, type: 'error',
-                content: `Agent stopped: exceeded ${LOOP_TIMEOUT_MS / 60000} minute time limit.`,
-            });
+            emit('error', `Agent stopped: exceeded ${LOOP_TIMEOUT_MS / 60000} minute time limit.`);
             return true;
         }
         return false;
     }
 
+    // Load relevant knowledge for context
+    const knowledge = await getRelevantKnowledge(message, 3);
+    if (knowledge.length > 0) {
+        emit('info', `Found ${knowledge.length} relevant past fix(es) in knowledge base.`);
+    }
+
     // ── Fast path: domain-connect request (no AI planning needed) ──────────
     const handled = await tryDomainConnect(userId, agentId, message);
-    if (handled) return;
+    if (handled) {
+        await finishTask(agentId, true, 'Domain/SSL task handled', allLogLines, retryCount);
+        return;
+    }
 
     // ── Phase 1: Plan (AI — searches Docker Hub dynamically) ──────────────
-    emitToUser(userId, 'agent:log', {
-        agentId, type: 'thinking',
-        content: 'Searching Docker Hub and planning your request…',
-    });
+    emit('thinking', 'Searching Docker Hub and planning your request…');
 
     let plan: ActionPlan;
     try {
         plan = await planWithAI(message, apiKey, model);
     } catch (e: any) {
-        emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Planning failed: ${e.message}` });
-        emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Planning failed' });
+        emit('error', `Planning failed: ${e.message}`);
+        await done(false, 'Planning failed');
         return;
     }
 
-    emitToUser(userId, 'agent:log', {
-        agentId, type: 'info',
-        content: `Plan ready — ${plan.steps.length} step(s): ${plan.steps.map(s => s.type).join(', ')}`,
-    });
-    emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
+    emit('info', `Plan ready — ${plan.steps.length} step(s): ${plan.steps.map(s => s.type).join(', ')}`);
+    emit('ai', plan.summary);
 
-    if (timedOut()) { emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary }); return; }
+    if (timedOut()) { await done(false, plan.summary); return; }
 
     // ── Phase 2: Execute initial plan ─────────────────────────────────────
     const execResult = await executeSteps(plan.steps, userId, agentId);
+    allLogLines.push(execResult.log);
     let accumulatedLog = execResult.log;
 
     if (execResult.failed) {
-        emitToUser(userId, 'agent:log', {
-            agentId, type: 'info',
-            content: 'Execution hit an error — AI will analyse the output and attempt a fix…',
-        });
+        emit('info', 'Execution hit an error — AI will analyse the output and attempt a fix…');
     }
 
-    if (timedOut()) { emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary }); return; }
+    if (timedOut()) { await done(false, plan.summary); return; }
 
     // ── Phase 3: Verify → Fix loop (bounded: MAX_VERIFY_CYCLES iterations) ──
     for (let cycle = 1; cycle <= MAX_VERIFY_CYCLES; cycle++) {
 
         if (timedOut()) break;
 
-        // Mandatory 1500ms delay between every AI API call
         await sleep(AI_CALL_DELAY_MS);
 
-        emitToUser(userId, 'agent:log', {
-            agentId, type: 'verify',
-            content: cycle === 1
-                ? 'Verifying results…'
-                : `Re-verifying after fix (attempt ${cycle}/${MAX_VERIFY_CYCLES})…`,
-        });
+        emit('verify', cycle === 1
+            ? 'Verifying results…'
+            : `Re-verifying after fix (attempt ${cycle}/${MAX_VERIFY_CYCLES})…`);
 
         let evaluation: EvalResult;
         try {
             evaluation = await evaluateWithAI(message, accumulatedLog, apiKey, model);
         } catch (e: any) {
-            emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `AI evaluation failed: ${e.message}` });
+            emit('error', `AI evaluation failed: ${e.message}`);
             break;
         }
 
-        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: evaluation.assessment });
+        emit('ai', evaluation.assessment);
 
         if (evaluation.ok) {
-            emitToUser(userId, 'agent:done', { agentId, success: true, summary: plan.summary });
+            await done(true, plan.summary);
             return;
         }
 
-        // No fix steps → nothing more AI can do
         if (!evaluation.fixSteps || evaluation.fixSteps.length === 0) {
-            emitToUser(userId, 'agent:log', {
-                agentId, type: 'error',
-                content: 'Verification failed and AI provided no fix steps. Stopping.',
-            });
+            emit('error', 'Verification failed and AI provided no fix steps. Stopping.');
             break;
         }
 
-        // Last cycle — don't apply fix, just report
         if (cycle === MAX_VERIFY_CYCLES) {
-            emitToUser(userId, 'agent:log', {
-                agentId, type: 'error',
-                content: `All ${MAX_VERIFY_CYCLES} fix attempts exhausted.`,
-            });
+            emit('error', `All ${MAX_VERIFY_CYCLES} fix attempts exhausted.`);
             break;
         }
 
         if (timedOut()) break;
 
-        // Apply fix steps (capped at MAX_FIX_STEPS)
         const safeFix = evaluation.fixSteps.slice(0, MAX_FIX_STEPS);
-        emitToUser(userId, 'agent:log', {
-            agentId, type: 'retry',
-            content: `Applying fix (attempt ${cycle}/${MAX_VERIFY_CYCLES - 1}) — ${safeFix.length} step(s)…`,
-        });
+        retryCount++;
+        emit('retry', `Applying fix (attempt ${cycle}/${MAX_VERIFY_CYCLES - 1}) — ${safeFix.length} step(s)…`);
 
         const fixResult = await executeSteps(safeFix, userId, agentId);
+        allLogLines.push(fixResult.log);
         accumulatedLog += `\n--- FIX ATTEMPT ${cycle} ---\n` + fixResult.log;
     }
 
-    emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary });
+    await done(false, plan.summary);
 }
 
 // ── Install Docker on host ────────────────────────────────────────────────────
@@ -1539,6 +1557,118 @@ router.post('/install-docker', authenticateToken, async (req, res) => {
             emitToUser(userId, 'agent:done', { agentId: id, success: false, summary: 'Docker install failed' });
         });
     });
+});
+
+// ── Task history ──────────────────────────────────────────────────────────────
+
+router.get('/tasks', authenticateToken, async (_req, res) => {
+    try {
+        const tasks = await listTasks(40);
+        res.json(tasks);
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.get('/tasks/:id', authenticateToken, async (req, res) => {
+    try {
+        const task = await getTask(String(req.params.id));
+        if (!task) return res.status(404).json({ message: 'Task not found' });
+        res.json(task);
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Knowledge base ────────────────────────────────────────────────────────────
+
+router.get('/knowledge', authenticateToken, async (_req, res) => {
+    try {
+        res.json(await listKnowledge(60));
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.delete('/knowledge/:id', authenticateToken, async (req, res) => {
+    try {
+        await deleteKnowledge(String(req.params.id));
+        res.json({ deleted: true });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Docker Hub REST API proxy ─────────────────────────────────────────────────
+
+router.get('/hub/search', authenticateToken, async (req, res) => {
+    const q     = String(req.query.q || '').trim();
+    const limit = Math.min(parseInt(String(req.query.limit || '8'), 10), 25);
+    if (!q) return res.status(400).json({ message: 'q is required' });
+    try {
+        const url  = `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(q)}&page_size=${limit}`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+        if (!resp.ok) return res.status(resp.status).json({ message: 'Docker Hub search failed' });
+        const data: any = await resp.json();
+        const results = (data.results || []).map((r: any) => ({
+            name:              r.repo_name || r.name || '',
+            is_official:       Boolean(r.is_official),
+            star_count:        r.star_count ?? 0,
+            pull_count:        r.pull_count ?? 0,
+            short_description: (r.short_description || '').slice(0, 200),
+        }));
+        res.json({ count: data.count ?? results.length, results });
+    } catch (err: any) {
+        res.status(502).json({ message: `Docker Hub search unavailable: ${err.message}` });
+    }
+});
+
+router.get('/hub/tags', authenticateToken, async (req, res) => {
+    const image = String(req.query.image || '').trim();
+    const page  = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(parseInt(String(req.query.limit || '20'), 10), 100);
+    if (!image) return res.status(400).json({ message: 'image is required' });
+
+    // Normalise: "library/nginx" or "nginx" → namespace/name
+    const parts = image.includes('/') ? image : `library/${image}`;
+    try {
+        const url  = `https://hub.docker.com/v2/repositories/${parts}/tags/?page=${page}&page_size=${limit}&ordering=last_updated`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+        if (!resp.ok) return res.status(resp.status).json({ message: `Tags fetch failed (${resp.status})` });
+        const data: any = await resp.json();
+        const results = (data.results || []).map((t: any) => ({
+            name:         t.name,
+            full_size:    t.full_size ?? 0,
+            last_updated: t.last_updated,
+            images:       (t.images || []).map((i: any) => ({ architecture: i.architecture, os: i.os })),
+        }));
+        res.json({ count: data.count ?? results.length, next: data.next ?? null, results });
+    } catch (err: any) {
+        res.status(502).json({ message: `Docker Hub tags unavailable: ${err.message}` });
+    }
+});
+
+router.get('/hub/info', authenticateToken, async (req, res) => {
+    const image = String(req.query.image || '').trim();
+    if (!image) return res.status(400).json({ message: 'image is required' });
+    const parts = image.includes('/') ? image : `library/${image}`;
+    try {
+        const url  = `https://hub.docker.com/v2/repositories/${parts}/`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+        if (!resp.ok) return res.status(resp.status).json({ message: `Image info fetch failed (${resp.status})` });
+        const d: any = await resp.json();
+        res.json({
+            name:              d.name,
+            namespace:         d.namespace,
+            is_official:       Boolean(d.is_official),
+            star_count:        d.star_count ?? 0,
+            pull_count:        d.pull_count ?? 0,
+            short_description: d.description || d.full_description?.slice(0, 300) || '',
+            last_updated:      d.last_updated,
+        });
+    } catch (err: any) {
+        res.status(502).json({ message: `Docker Hub info unavailable: ${err.message}` });
+    }
 });
 
 export default router;
