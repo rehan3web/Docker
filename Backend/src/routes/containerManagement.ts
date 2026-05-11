@@ -14,6 +14,56 @@ import { getJwtSecret } from '../lib/secret';
 const router = express.Router();
 router.use(authenticateToken);
 
+// ── Traefik file-provider helpers ─────────────────────────────────────────────
+const TRAEFIK_CONFIGS_DIR = path.join(process.cwd(), 'traefik-configs');
+if (!fs.existsSync(TRAEFIK_CONFIGS_DIR)) {
+    try { fs.mkdirSync(TRAEFIK_CONFIGS_DIR, { recursive: true }); } catch { }
+}
+
+function safeTraefikId(name: string): string {
+    return 'ctr-' + name.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+function containerTraefikConfig(id: string, fullDomain: string, serverIp: string, port: number): string {
+    return `# Managed by Docklet (container domain) — do not edit manually
+http:
+  routers:
+    ${id}-http:
+      rule: "Host(\`${fullDomain}\`)"
+      entrypoints:
+        - web
+      middlewares:
+        - ${id}-redirect
+      service: ${id}-svc
+
+    ${id}-https:
+      rule: "Host(\`${fullDomain}\`)"
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      service: ${id}-svc
+
+  middlewares:
+    ${id}-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+  services:
+    ${id}-svc:
+      loadBalancer:
+        servers:
+          - url: "http://${serverIp}:${port}"
+`;
+}
+
+function removeContainerTraefikConfig(name: string): void {
+    const id = safeTraefikId(name);
+    const p = path.join(TRAEFIK_CONFIGS_DIR, `container-${id}.yml`);
+    try { fs.unlinkSync(p); } catch { }
+}
+
 // ── Server-IP detection ───────────────────────────────────────────────────────
 let _cachedIp: string | null = null;
 async function getServerIp(): Promise<string> {
@@ -792,109 +842,22 @@ router.post('/containers/:name/domain/traefik', async (req, res) => {
         if (!rows.length) return res.status(404).json({ message: 'No domain assigned to this container' });
         const dom = rows[0];
 
-        const docker = getDocker();
-        const containers = await docker.listContainers({ all: true });
-        const found = containers.find(c => c.Names.some(n => n.replace(/^\//, '') === name));
-        if (!found) return res.status(404).json({ message: 'Container not found in Docker' });
+        const serverIp = await getServerIp();
+        const id = safeTraefikId(name);
+        const configPath = path.join(TRAEFIK_CONFIGS_DIR, `container-${id}.yml`);
 
-        const containerObj = docker.getContainer(found.Id);
-        const info = await containerObj.inspect();
+        // Write Traefik file-provider config — hot-reloaded instantly, no container restart needed.
+        // Routes to http://SERVER_IP:HOST_PORT (the port the user entered, which is the host-mapped port).
+        fs.writeFileSync(configPath, containerTraefikConfig(id, dom.full_domain, serverIp, dom.port));
+        console.log(`[Traefik] Wrote config for "${name}" → ${dom.full_domain} → ${serverIp}:${dom.port}`);
 
-        // Build Traefik labels (merge into existing, don't clobber compose labels)
-        const safeName = name.replace(/[^a-zA-Z0-9]/g, '-');
-        const traefikLabels: Record<string, string> = {
-            'traefik.enable': 'true',
-            [`traefik.http.routers.${safeName}.rule`]: `Host(\`${dom.full_domain}\`)`,
-            [`traefik.http.routers.${safeName}.entrypoints`]: 'web,websecure',
-            [`traefik.http.routers.${safeName}.tls.certresolver`]: 'letsencrypt',
-            [`traefik.http.services.${safeName}.loadbalancer.server.port`]: String(dom.port),
-        };
-        const mergedLabels = { ...(info.Config.Labels ?? {}), ...traefikLabels };
-
-        // Update DB and respond BEFORE touching the container.
-        // The container being recreated may be the one proxying this very request
-        // (e.g. docklet-client / nginx frontend), so we must send the response
-        // first or the connection gets dropped mid-flight.
         await executeQuery(
             `UPDATE container_domains SET nginx_enabled=FALSE, traefik_enabled=TRUE, routing_mode='traefik' WHERE container_name=$1`, [name]
         );
-        res.json({ ok: true, fullDomain: dom.full_domain, labels: traefikLabels });
-
-        // ── Background recreation (response already sent) ──────────────────────
-        setImmediate(async () => {
-            try {
-                console.log(`[Traefik] Recreating container "${name}" with labels…`);
-
-                // Stop with a short timeout
-                try {
-                    await containerObj.stop({ t: 5 } as any);
-                } catch (e: any) {
-                    if (!e.message?.includes('not running') && e.statusCode !== 304) {
-                        console.warn(`[Traefik] stop warning: ${e.message}`);
-                    }
-                }
-
-                // Force-remove
-                try {
-                    await containerObj.remove({ force: true } as any);
-                } catch (e: any) {
-                    console.warn(`[Traefik] remove warning: ${e.message}`);
-                }
-
-                // Brief pause — Docker needs a moment to release the container name
-                await new Promise(r => setTimeout(r, 800));
-
-                // Collect all networks the old container was connected to
-                const oldNetworks = Object.entries(info.NetworkSettings?.Networks ?? {});
-                const [firstNetName, firstNetCfg] = oldNetworks[0] ?? [];
-
-                const newContainer = await docker.createContainer({
-                    name,
-                    Image: info.Config.Image,
-                    Cmd: info.Config.Cmd?.length ? info.Config.Cmd : undefined,
-                    Entrypoint: info.Config.Entrypoint?.length ? info.Config.Entrypoint : undefined,
-                    Env: info.Config.Env || [],
-                    ExposedPorts: info.Config.ExposedPorts || {},
-                    WorkingDir: info.Config.WorkingDir || undefined,
-                    User: info.Config.User || undefined,
-                    HostConfig: sanitiseHostConfig(info.HostConfig),
-                    Labels: mergedLabels,
-                    // Reconnect to the first network during creation
-                    ...(firstNetName ? {
-                        NetworkingConfig: {
-                            EndpointsConfig: {
-                                [firstNetName]: {
-                                    IPAMConfig: firstNetCfg?.IPAMConfig ?? {},
-                                    Aliases: firstNetCfg?.Aliases ?? [],
-                                },
-                            },
-                        },
-                    } : {}),
-                });
-                await newContainer.start();
-
-                // Reconnect to any additional networks (Docker only allows one at create-time)
-                for (const [netName, netCfg] of oldNetworks.slice(1)) {
-                    try {
-                        const network = docker.getNetwork((netCfg as any).NetworkID || netName);
-                        await (network as any).connect({
-                            Container: newContainer.id,
-                            EndpointConfig: { Aliases: (netCfg as any)?.Aliases ?? [] },
-                        });
-                    } catch (netErr: any) {
-                        console.warn(`[Traefik] Could not rejoin network "${netName}": ${netErr.message}`);
-                    }
-                }
-
-                console.log(`[Traefik] Container "${name}" recreated and started (networks: ${oldNetworks.map(([n]) => n).join(', ') || 'default'}).`);
-
-            } catch (bgErr: any) {
-                console.error(`[Traefik] Background recreation failed for "${name}":`, bgErr.message);
-            }
-        });
+        res.json({ ok: true, fullDomain: dom.full_domain, configPath });
     } catch (err: any) {
         console.error(`[Traefik] Error for "${name}":`, err.message);
-        if (!res.headersSent) res.status(500).json({ message: err.message });
+        res.status(500).json({ message: err.message });
     }
 });
 
@@ -936,6 +899,7 @@ networks:
 
 router.delete('/containers/:name/domain', async (req, res) => {
     const { name } = req.params;
+    removeContainerTraefikConfig(name);
     await executeQuery('DELETE FROM container_domains WHERE container_name=$1', [name]);
     res.json({ ok: true });
 });
@@ -946,6 +910,7 @@ router.post('/containers/:name/domain/regenerate', async (req, res) => {
         'SELECT * FROM container_domains WHERE container_name = $1', [name]
     );
     if (!rows.length) return res.status(404).json({ message: 'No domain found' });
+    removeContainerTraefikConfig(name);
     const { rows: base } = await executeQuery('SELECT * FROM base_domain_config WHERE id = 1');
     const baseDomain = base[0]?.domain;
     const newSub = `app-${randomSlug()}`;

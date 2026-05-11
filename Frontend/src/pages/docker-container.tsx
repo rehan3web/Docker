@@ -1176,9 +1176,9 @@ function DomainTab({ containerName }: { containerName: string }) {
                   Traefik
                   <Badge className="text-[9px] py-0 px-1 rounded-full bg-purple-500/15 text-purple-400 border-purple-500/30 ml-auto">Labels</Badge>
                 </div>
-                <p className="text-[11px] text-muted-foreground">Recreate container with Traefik Docker labels. Requires Traefik running with Docker provider.</p>
+                <p className="text-[11px] text-muted-foreground">Write a Traefik routing config for this domain. Instant — no container restart needed. Requires Traefik running.</p>
                 <Button size="sm" variant="outline" className="h-7 text-xs w-full" onClick={() => setTraefikConfirmOpen(true)} disabled={enablingTraefik}>
-                  {enablingTraefik ? <Loader2 className="w-3 h-3 animate-spin" /> : (domain as any).traefik_enabled ? "Re-apply Labels" : "Activate Traefik"}
+                  {enablingTraefik ? <Loader2 className="w-3 h-3 animate-spin" /> : (domain as any).traefik_enabled ? "Re-apply Routing" : "Activate Routing"}
                 </Button>
               </div>
               <div className="rounded-lg border border-border/50 bg-muted/10 overflow-hidden">
