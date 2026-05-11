@@ -1,0 +1,191 @@
+Add automatic RailPack build support.
+
+Requirements:
+
+# Build System Logic
+
+When repository is cloned:
+
+## Step 1
+
+Check if `Dockerfile` exists.
+
+If Dockerfile exists:
+
+* use normal Docker build
+* do NOT use RailPack
+
+Example:
+
+```text id="f1"
+Dockerfile found
+→ docker build
+```
+
+---
+
+If Dockerfile does NOT exist:
+
+* automatically use RailPack build system
+* auto detect runtime/framework
+* generate build image automatically
+
+Example:
+
+```text id="f2"
+No Dockerfile found
+→ RailPack build
+```
+
+Supported auto detection:
+
+* Node.js
+* Next.js
+* Python
+* Go
+* Rust
+* PHP
+* Bun
+* Static apps
+
+---
+
+# Queue Based Build System
+
+Do NOT allow unlimited parallel builds.
+
+Add centralized queue-based build architecture.
+
+Requirements:
+
+* build queue
+* worker system
+* retry support
+* build status tracking
+* queued/building/success/failed states
+* prevent server overload
+
+Architecture:
+
+```text id="f3"
+Deploy Request
+      ↓
+Redis Queue / MQ
+      ↓
+Build Worker
+      ↓
+Docker Build OR RailPack Build
+      ↓
+Deploy
+```
+
+---
+
+# Multiple Builds
+
+Support:
+
+* multiple queued builds
+* controlled concurrency
+* configurable max parallel builds
+
+Example:
+
+```env id="f4"
+MAX_PARALLEL_BUILDS=3
+```
+
+---
+
+# Redis Live Build Logs Cache
+
+Add Redis-based live log caching.
+
+Requirements:
+
+* realtime build logs
+* websocket/SSE streaming
+* logs survive frontend refresh/reload
+* instant log restore from Redis
+* quick refresh within seconds
+
+Architecture:
+
+```text id="f5"
+Build Worker
+   ↓
+Redis Logs Cache
+   ↓
+WebSocket
+   ↓
+Frontend Live Logs
+```
+
+Store:
+
+```text id="f6"
+build:{id}:logs
+build:{id}:status
+build:{id}:stream
+```
+
+Use:
+
+* Redis Lists
+* Redis Pub/Sub
+
+---
+
+# Auto Deploy Tab
+
+In Auto Deploy tab:
+
+* use MQ/queue system
+* background deployments
+* deployment retries
+* deployment history
+* deployment status updates
+* live deployment logs
+
+Recommended:
+
+* BullMQ
+* Redis Queue
+* RabbitMQ (optional)
+
+---
+
+# Build Worker Responsibilities
+
+Worker must:
+
+* clone repository
+* detect Dockerfile
+* run Docker or RailPack build
+* stream logs live
+* cache logs in Redis
+* push image
+* deploy container
+* update deployment status
+
+---
+
+# Recommended Stack
+
+
+Node.js Libraries:
+
+* bullmq
+* ioredis
+* ws/socket.io
+
+---
+
+# Important Rules
+
+* RailPack ONLY used when Dockerfile missing
+* Dockerfile always takes priority
+* Queue system mandatory
+* Live logs must persist after frontend reload
+* Build workers isolated from main API
+* Prevent unlimited concurrent builds
