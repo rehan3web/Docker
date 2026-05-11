@@ -27,13 +27,65 @@ import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import TwoFASetupOverlay from "@/components/TwoFASetupOverlay";
 import { ThemeProvider } from "@/hooks/use-theme";
-import { getToken } from "@/api/client";
+import { getToken, clearToken } from "@/api/client";
+import { toast } from "sonner";
 
 const queryClient = new QueryClient();
+
+// ── JWT expiry guard ──────────────────────────────────────────────────────────
+// Proactively watches the JWT exp claim and logs the user out the moment
+// the token expires, even while the tab is idle.
+
+function useTokenExpiryGuard() {
+  const [, navigate] = useLocation();
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    function scheduleCheck() {
+      if (timer) clearTimeout(timer);
+      const token = getToken();
+      if (!token) return;
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        const exp: number | undefined = payload.exp;
+        if (!exp) return;
+        const msLeft = exp * 1000 - Date.now();
+        if (msLeft <= 0) {
+          doLogout();
+          return;
+        }
+        // Fire exactly when the token expires (capped at JS max safe timeout ~24 days)
+        timer = setTimeout(doLogout, Math.min(msLeft, 2_147_483_647));
+      } catch { /* malformed token — leave it for the next API call to handle */ }
+    }
+
+    function doLogout() {
+      clearToken();
+      queryClient.clear();
+      toast.error("Your session has expired. Please log in again.");
+      navigate("/login");
+    }
+
+    scheduleCheck();
+
+    // Re-evaluate when the user switches back to the tab (handles long idle periods)
+    const onVisible = () => { if (document.visibilityState === "visible") scheduleCheck(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", scheduleCheck);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", scheduleCheck);
+    };
+  }, [navigate]);
+}
 
 function PrivateRoute({ component: Component }: { component: React.ComponentType }) {
   const [, navigate] = useLocation();
   const token = getToken();
+  useTokenExpiryGuard();
 
   useEffect(() => {
     if (!token) navigate("/login");

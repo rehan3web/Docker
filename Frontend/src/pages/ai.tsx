@@ -22,12 +22,18 @@ import { cn } from "@/lib/utils";
 import MarkdownContent from "@/components/MarkdownContent";
 
 const NVIDIA_MODELS = [
-  { value: "openai/gpt-oss-120b",                label: "GPT-OSS 120B (Default)" },
-  { value: "meta/llama-3.3-70b-instruct",         label: "Llama 3.3 70B Instruct" },
-  { value: "meta/llama-3.1-405b-instruct",        label: "Llama 3.1 405B Instruct" },
-  { value: "mistralai/mistral-large-2-instruct",  label: "Mistral Large 2" },
-  { value: "nvidia/nemotron-4-340b-instruct",     label: "Nemotron 4 340B" },
-  { value: "google/gemma-3-27b-it",              label: "Gemma 3 27B IT" },
+  { value: "openai/gpt-oss-120b",                                   label: "ChatGPT OSS 120B",            provider: "OpenAI",       thinking: true  },
+  { value: "deepseek-ai/deepseek-v4-pro",                           label: "DeepSeek V4 Pro",             provider: "DeepSeek",     thinking: true  },
+  { value: "moonshotai/kimi-k2-thinking",                           label: "Kimi K2 Thinking",            provider: "Moonshot AI",  thinking: true  },
+  { value: "qwen/qwen3-next-80b-a3b-thinking",                      label: "Qwen3 80B Thinking",          provider: "Alibaba",      thinking: true  },
+  { value: "qwen/qwen3.5-397b-a17b",                                label: "Qwen 3.5 397B",               provider: "Alibaba",      thinking: true  },
+  { value: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",         label: "Nemotron 3 Nano Omni 30B",    provider: "NVIDIA",       thinking: true  },
+  { value: "google/gemma-3-27b-it",                                 label: "Gemma 3 27B",                 provider: "Google",       thinking: false },
+  { value: "google/gemma-3-12b-it",                                 label: "Gemma 3 12B",                 provider: "Google",       thinking: false },
+  { value: "meta/llama-3.1-8b-instruct",                            label: "Llama 3.1 8B",                provider: "Meta",         thinking: false },
+  { value: "meta/llama-3.3-70b-instruct",                           label: "Llama 3.3 70B",               provider: "Meta",         thinking: false },
+  { value: "mistralai/mistral-large-3-675b-instruct-2512",          label: "Mistral Large 3 675B",        provider: "Mistral AI",   thinking: false },
+  { value: "stepfun-ai/step-3.5-flash",                             label: "Step 3.5 Flash",              provider: "Stepfun AI",   thinking: false },
 ];
 
 type ChatMsg = { role: "user" | "assistant"; content: string };
@@ -388,8 +394,23 @@ export default function AiPage() {
                     onChange={e => setModel(e.target.value)}
                     className="w-full h-9 text-xs bg-background border border-border rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-ring"
                   >
-                    {NVIDIA_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    <optgroup label="Thinking / Reasoning">
+                      {NVIDIA_MODELS.filter(m => m.thinking).map(m => (
+                        <option key={m.value} value={m.value}>{m.label} — {m.provider}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Fast / Instruction">
+                      {NVIDIA_MODELS.filter(m => !m.thinking).map(m => (
+                        <option key={m.value} value={m.value}>{m.label} — {m.provider}</option>
+                      ))}
+                    </optgroup>
                   </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    {(() => {
+                      const sel = NVIDIA_MODELS.find(m => m.value === (model || settings?.model || NVIDIA_MODELS[0].value));
+                      return sel ? `${sel.provider} · ${sel.thinking ? "Reasoning model — shows thinking steps" : "Fast instruction-tuned model"}` : "";
+                    })()}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" className="h-8 text-xs gap-1.5" onClick={handleSave} disabled={saving || !apiKey.trim()}>

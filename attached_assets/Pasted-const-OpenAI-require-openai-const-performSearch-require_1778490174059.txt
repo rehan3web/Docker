@@ -1,0 +1,351 @@
+const { OpenAI } = require('openai');
+const { performSearch } = require('../utils/search');
+
+const MODELS = [
+  {
+    id: "moonshotai/kimi-k2-thinking",
+    label: "Kimi K2 Thinking",
+    provider: "Moonshot AI",
+    thinking: true,
+    description: "Shows reasoning steps before answering",
+  },
+  {
+    id: "qwen/qwen3-next-80b-a3b-thinking",
+    label: "Qwen3 80B Thinking",
+    provider: "Alibaba",
+    thinking: true,
+    description: "Large reasoning model with step-by-step thinking",
+  },
+  {
+    id: "google/gemma-3-27b-it",
+    label: "Gemma 3 27B",
+    provider: "Google",
+    thinking: false,
+    description: "Fast, instruction-tuned Gemma model",
+  },
+  {
+    id: "google/gemma-3-12b-it",
+    label: "Gemma 3 12B",
+    provider: "Google",
+    thinking: false,
+    description: "Lighter Gemma model, quicker responses",
+  },
+  {
+    id: "meta/llama-3.1-8b-instruct",
+    label: "Llama 3.1 8B",
+    provider: "Meta",
+    thinking: false,
+    description: "Compact and very fast",
+  },
+  {
+    id: "deepseek-ai/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    provider: "DeepSeek",
+    thinking: true,
+    description: "DeepSeek V4 Pro with configurable thinking",
+  },
+  {
+    id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    label: "Nemotron 3 Nano Omni",
+    provider: "NVIDIA",
+    thinking: true,
+    description: "Multimodal model for text and images",
+  },
+  {
+    id: "mistralai/mistral-large-3-675b-instruct-2512",
+    label: "Mistral Large 3 675B",
+    provider: "Mistral AI",
+    thinking: false,
+    description: "Mistral Large 3 on NVIDIA",
+  },
+  {
+    id: "openai/gpt-oss-120b",
+    label: "ChatGPT OSS 120B",
+    provider: "OpenAI",
+    thinking: true,
+    description: "Open source GPT model on NVIDIA",
+  },
+  {
+    id: "qwen/qwen3.5-397b-a17b",
+    label: "Qwen 3.5 397B",
+    provider: "Alibaba",
+    thinking: true,
+    description: "Latest Qwen reasoning model",
+  },
+  {
+    id: "stepfun-ai/step-3.5-flash",
+    label: "Step 3.5 Flash",
+    provider: "Stepfun AI",
+    thinking: false,
+    description: "High-speed Step-3.5 model",
+  },
+];
+
+const generateChatResponse = async (messages, modelId = "deepseek-ai/deepseek-v4-pro") => {
+    try {
+        const currentDate = new Date().toLocaleString('en-US', { timeZone: 'UTC' });
+        const systemMessage = {
+            role: 'system',
+            content: `Current Date and Time: ${currentDate} UTC. You are RevenGPT, a helpful AI assistant.`
+        };
+        
+        messages = [systemMessage, ...messages];
+        
+        const API_KEY = process.env.NVIDIA_API_KEY;
+        if (!API_KEY) {
+            throw new Error("Missing NVIDIA_API_KEY in .env");
+        }
+
+        const openai = new OpenAI({
+            baseURL: "https://integrate.api.nvidia.com/v1",
+            apiKey: API_KEY
+        });
+
+        const model = MODELS.find(m => m.id === modelId) || MODELS[5]; // default to DeepSeek
+
+        // Map messages to standard format, handling images
+        const formattedMessages = messages.map(msg => {
+            if (msg.image) {
+                return {
+                    role: msg.role === 'assistant' ? 'assistant' : msg.role,
+                    content: [
+                        { type: "image_url", image_url: { url: msg.image } },
+                        { type: "text", text: msg.content }
+                    ]
+                };
+            }
+            return {
+                role: msg.role === 'assistant' ? 'assistant' : msg.role,
+                content: msg.content
+            };
+        });
+
+        const payload = {
+            model: model.id,
+            messages: formattedMessages,
+            temperature: model.thinking ? 0.6 : 1.0,
+            top_p: 0.95,
+            stream: true, // Use stream as requested to avoid timeouts
+        };
+
+        // Some models support 16k tokens, others default to 4k
+        if (model.id === "deepseek-ai/deepseek-v4-pro") {
+            payload.max_tokens = 16384;
+            payload.extra_body = {
+                chat_template_kwargs: {
+                    thinking: model.thinking
+                }
+            };
+        } else if (model.id === "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning") {
+            payload.max_tokens = 65536;
+            payload.temperature = 0.2;
+            payload.reasoning_budget = 16384;
+            payload.chat_template_kwargs = { "enable_thinking": false };
+        } else if (model.id === "mistralai/mistral-large-3-675b-instruct-2512") {
+            payload.max_tokens = 2048;
+            payload.temperature = 0.15;
+            payload.top_p = 1.00;
+            payload.frequency_penalty = 0.00;
+            payload.presence_penalty = 0.00;
+        } else if (model.id === "openai/gpt-oss-120b") {
+            payload.max_tokens = 4096;
+            payload.temperature = 1;
+            payload.top_p = 1;
+        } else if (model.id === "qwen/qwen3.5-397b-a17b") {
+            payload.max_tokens = 16384;
+            payload.temperature = 0.60;
+            payload.top_p = 0.95;
+            payload.top_k = 20;
+            payload.presence_penalty = 0;
+            payload.repetition_penalty = 1;
+            payload.chat_template_kwargs = { "enable_thinking": true };
+        } else if (model.id === "stepfun-ai/step-3.5-flash") {
+            payload.max_tokens = 16384;
+            payload.temperature = 1;
+            payload.top_p = 0.9;
+        } else {
+            payload.max_tokens = 4096;
+        }
+
+        const completion = await openai.chat.completions.create(payload);
+
+        let finalContent = "";
+        let reasoningContent = "";
+
+        // Consume the stream synchronously to compile the full response string
+        for await (const chunk of completion) {
+            if (!chunk.choices) continue;
+            
+            const delta = chunk.choices[0]?.delta;
+            if (delta?.content) {
+                finalContent += delta.content;
+            }
+            if (delta?.reasoning_content) {
+                reasoningContent += delta.reasoning_content;
+            }
+        }
+
+        if (reasoningContent) {
+            finalContent = `<thinking>\n${reasoningContent}\n</thinking>\n\n${finalContent}`;
+        } else if (finalContent.includes('<think>')) {
+            finalContent = finalContent
+                .replace('<think>', '<thinking>\n')
+                .replace('</think>', '\n</thinking>\n\n');
+        }
+
+        return finalContent;
+    } catch (error) {
+        console.error("AI Generation Error: ", error.message);
+        throw new Error("Failed to generate AI response");
+    }
+};
+
+const generateChatStream = async (res, messages, modelId = "deepseek-ai/deepseek-v4-pro", searchEnabled = false) => {
+    try {
+        const currentDate = new Date().toLocaleString('en-US', { timeZone: 'UTC' });
+        const systemMessage = {
+            role: 'system',
+            content: `Current Date and Time: ${currentDate} UTC. You are RevenGPT, a helpful AI assistant.`
+        };
+        
+        messages = [systemMessage, ...messages];
+
+        const API_KEY = process.env.NVIDIA_API_KEY;
+        if (!API_KEY) {
+            throw new Error("Missing NVIDIA_API_KEY in .env");
+        }
+
+        if (searchEnabled) {
+            const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+            if (lastUserMessage) {
+                res.write(`data: ${JSON.stringify({ text: "<thinking>\nSearching the internet for information...\n" })}\n\n`);
+                const searchResults = await performSearch(lastUserMessage.content);
+                res.write(`data: ${JSON.stringify({ text: "Found search results. Analyzing...\n</thinking>\n\n" })}\n\n`);
+                
+                // Add search results as a system message or prepend to user message
+                const searchContext = `Current Date: ${currentDate}\n\nWeb Search Context:\n${searchResults}\n\nPlease use the above information to provide an accurate and up-to-date answer. If the information is not relevant, ignore it.`;
+                
+                messages = [
+                    ...messages.slice(0, -1),
+                    { 
+                        role: 'user', 
+                        content: `Context: ${searchContext}\n\nUser Question: ${lastUserMessage.content}`,
+                        image: lastUserMessage.image
+                    }
+                ];
+            }
+        }
+
+        const openai = new OpenAI({
+            baseURL: "https://integrate.api.nvidia.com/v1",
+            apiKey: API_KEY
+        });
+
+        const model = MODELS.find(m => m.id === modelId) || MODELS[5]; 
+
+        const formattedMessages = messages.map(msg => {
+            if (msg.image) {
+                return {
+                    role: msg.role === 'assistant' ? 'assistant' : msg.role,
+                    content: [
+                        { type: "image_url", image_url: { url: msg.image } },
+                        { type: "text", text: msg.content }
+                    ]
+                };
+            }
+            return {
+                role: msg.role === 'assistant' ? 'assistant' : msg.role,
+                content: msg.content
+            };
+        });
+
+        const payload = {
+            model: model.id,
+            messages: formattedMessages,
+            temperature: model.thinking ? 0.6 : 1.0,
+            top_p: 0.95,
+            stream: true,
+        };
+
+        if (model.id === "deepseek-ai/deepseek-v4-pro") {
+            payload.max_tokens = 16384;
+            payload.extra_body = {
+                chat_template_kwargs: { thinking: model.thinking }
+            };
+        } else if (model.id === "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning") {
+            payload.max_tokens = 65536;
+            payload.temperature = 0.2;
+            payload.reasoning_budget = 16384;
+            payload.chat_template_kwargs = { "enable_thinking": false };
+        } else if (model.id === "mistralai/mistral-large-3-675b-instruct-2512") {
+            payload.max_tokens = 2048;
+            payload.temperature = 0.15;
+            payload.top_p = 1.00;
+            payload.frequency_penalty = 0.00;
+            payload.presence_penalty = 0.00;
+        } else if (model.id === "openai/gpt-oss-120b") {
+            payload.max_tokens = 4096;
+            payload.temperature = 1;
+            payload.top_p = 1;
+        } else if (model.id === "qwen/qwen3.5-397b-a17b") {
+            payload.max_tokens = 16384;
+            payload.temperature = 0.60;
+            payload.top_p = 0.95;
+            payload.top_k = 20;
+            payload.presence_penalty = 0;
+            payload.repetition_penalty = 1;
+            payload.chat_template_kwargs = { "enable_thinking": true };
+        } else if (model.id === "stepfun-ai/step-3.5-flash") {
+            payload.max_tokens = 16384;
+            payload.temperature = 1;
+            payload.top_p = 0.9;
+        } else {
+            payload.max_tokens = 4096;
+        }
+
+        const completion = await openai.chat.completions.create(payload);
+
+        let finalContent = "";
+        let reasoningContent = "";
+        let hasStartedThinking = false;
+        let hasFinishedThinking = false;
+
+        for await (const chunk of completion) {
+            if (!chunk.choices) continue;
+            
+            const delta = chunk.choices[0]?.delta;
+            if (delta?.reasoning_content) {
+                if (!hasStartedThinking) {
+                    res.write(`data: ${JSON.stringify({ text: "<thinking>\n" })}\n\n`);
+                    hasStartedThinking = true;
+                }
+                reasoningContent += delta.reasoning_content;
+                res.write(`data: ${JSON.stringify({ text: delta.reasoning_content })}\n\n`);
+            }
+            if (delta?.content) {
+                if (hasStartedThinking && !hasFinishedThinking) {
+                    res.write(`data: ${JSON.stringify({ text: "\n</thinking>\n\n" })}\n\n`);
+                    hasFinishedThinking = true;
+                }
+                finalContent += delta.content;
+                res.write(`data: ${JSON.stringify({ text: delta.content })}\n\n`);
+            }
+        }
+
+        let formattedOutput = finalContent;
+        if (reasoningContent) {
+            formattedOutput = `<thinking>\n${reasoningContent}\n</thinking>\n\n${formattedOutput}`;
+        } else if (formattedOutput.includes('<think>')) {
+            formattedOutput = formattedOutput
+                .replace('<think>', '<thinking>\n')
+                .replace('</think>', '\n</thinking>\n\n');
+        }
+
+        return formattedOutput;
+    } catch (error) {
+        console.error("AI Generation Error: ", error.message);
+        throw new Error("Failed to generate AI response");
+    }
+};
+
+module.exports = { generateChatResponse, generateChatStream, MODELS };
