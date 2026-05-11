@@ -9,6 +9,12 @@ import {
     initAgentDb, createTask, finishTask, listTasks, getTask,
     recordKnowledge, listKnowledge, deleteKnowledge, getRelevantKnowledge,
 } from '../lib/agentDb';
+import {
+    initMemoryDb, saveMemoryTurn, getRecentMemory,
+    saveRagEntry, searchRagDocs,
+    formatMemoryContext, formatRagContext,
+    getMemoryStats, clearUserMemory,
+} from '../lib/agentMemory';
 
 const router = express.Router();
 
@@ -27,6 +33,79 @@ const cancelledAgents = new Set<string>();
 function cancelAgent(agentId: string): void { cancelledAgents.add(agentId); }
 function isCancelled(agentId: string): boolean { return cancelledAgents.has(agentId); }
 function clearCancel(agentId: string): void { cancelledAgents.delete(agentId); }
+
+// ── Per-user message queue ─────────────────────────────────────────────────────
+
+interface QueueItem {
+    queueId:  string;
+    agentId:  string;
+    message:  string;
+    userId:   string;
+    queuedAt: number;
+    position: number;
+    apiKey:   string;
+    model:    string;
+}
+
+const userQueues   = new Map<string, QueueItem[]>(); // userId → ordered queue
+const activeAgents = new Map<string, string>();       // userId → currently running agentId
+
+function isUserBusy(userId: string): boolean {
+    return activeAgents.has(userId);
+}
+
+function enqueueMessage(userId: string, item: QueueItem): number {
+    if (!userQueues.has(userId)) userQueues.set(userId, []);
+    const q   = userQueues.get(userId)!;
+    item.position = q.length + 1;
+    q.push(item);
+    return item.position;
+}
+
+function dequeueNext(userId: string): QueueItem | null {
+    const q = userQueues.get(userId);
+    if (!q || !q.length) return null;
+    const item = q.shift()!;
+    q.forEach((qi, i) => { qi.position = i + 1; });
+    return item;
+}
+
+function cancelQueuedItem(userId: string, queueId: string): boolean {
+    const q = userQueues.get(userId);
+    if (!q) return false;
+    const idx = q.findIndex(qi => qi.queueId === queueId);
+    if (idx < 0) return false;
+    q.splice(idx, 1);
+    q.forEach((qi, i) => { qi.position = i + 1; });
+    return true;
+}
+
+function getUserQueue(userId: string): QueueItem[] {
+    return userQueues.get(userId) || [];
+}
+
+async function processNextInQueue(userId: string): Promise<void> {
+    const next = dequeueNext(userId);
+    if (!next) { activeAgents.delete(userId); return; }
+
+    activeAgents.set(userId, next.agentId);
+    emitToUser(userId, 'agent:dequeued', { agentId: next.agentId, queueId: next.queueId });
+
+    const remaining = getUserQueue(userId);
+    emitToUser(userId, 'agent:queue_update', {
+        items: remaining.map(q => ({ agentId: q.agentId, queueId: q.queueId, position: q.position })),
+    });
+
+    try {
+        await runAgentLoop(userId, next.agentId, next.message, next.apiKey, next.model);
+    } catch (err: any) {
+        emitToUser(userId, 'agent:log', { agentId: next.agentId, type: 'error', content: `Agent crashed: ${err.message}` });
+        emitToUser(userId, 'agent:done', { agentId: next.agentId, success: false, summary: 'Agent crashed' });
+    }
+
+    activeAgents.delete(userId);
+    await processNextInQueue(userId);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -466,7 +545,7 @@ async function searchDockerHub(query: string): Promise<string> {
     }
 }
 
-async function planWithAI(message: string, apiKey: string, model: string): Promise<ActionPlan> {
+async function planWithAI(message: string, apiKey: string, model: string, memoryCtx?: string): Promise<ActionPlan> {
     const context   = isDockerAvailable() ? getDockerContext() : 'Docker is not available.';
     const domainCtx = await getDomainContext();
 
@@ -479,7 +558,11 @@ async function planWithAI(message: string, apiKey: string, model: string): Promi
         hubSection = `\n\nDOCKER HUB SEARCH RESULTS (use these image names — do not guess):\n${parts}`;
     }
 
-    const userPrompt = `LIVE DOCKER CONTEXT:\n${context}\n\nDOMAIN CONTEXT:\n${domainCtx}${hubSection}\n\nUSER REQUEST: ${message}`;
+    const memSection = memoryCtx
+        ? `\n\nPAST CONTEXT (conversation history + relevant past tasks — use to avoid repeating completed work):\n${memoryCtx}`
+        : '';
+
+    const userPrompt = `LIVE DOCKER CONTEXT:\n${context}\n\nDOMAIN CONTEXT:\n${domainCtx}${hubSection}${memSection}\n\nUSER REQUEST: ${message}`;
 
     const res = await makeOpenAI(apiKey).chat.completions.create({
         model,
@@ -1725,7 +1808,8 @@ function classifyLogs(intent: string, rawLines: string[], success: boolean, summ
 
 // ── Init DB on module load ────────────────────────────────────────────────────
 
-initAgentDb().catch(err => console.warn('[AgentDB] Init warning:', err.message));
+initAgentDb().catch(err  => console.warn('[AgentDB] Init warning:', err.message));
+initMemoryDb().catch(err => console.warn('[MemoryDB] Init warning:', err.message));
 
 // ── ReAct loop (Plan → Execute → Verify → Fix → Verify …) ────────────────────
 
@@ -1788,13 +1872,20 @@ async function runAgentLoop(
         // Store knowledge on success
         if (success) {
             const key = message.toLowerCase().replace(/[^a-z0-9 ]/g, '').slice(0, 80);
-            await recordKnowledge(
-                key,
-                message.slice(0, 200),
-                summary,
-                []
-            ).catch(() => { /* non-fatal */ });
+            await recordKnowledge(key, message.slice(0, 200), summary, []).catch(() => {});
         }
+        // ── Persist to memory + RAG ──────────────────────────────────────────
+        const agentSummary = summary || (success ? 'Task completed successfully.' : 'Task failed.');
+        await saveMemoryTurn(userId, 'agent', agentSummary, agentId);
+        const commandsUsed = allLogLines
+            .filter(l => l.startsWith('[command]'))
+            .map(l => l.replace('[command] ', '').trim())
+            .slice(0, 20);
+        await saveRagEntry(
+            userId, agentId, message, agentSummary,
+            [], commandsUsed,
+            success ? 'success' : 'failed'
+        ).catch(() => {});
     }
 
     function timedOut(): boolean {
@@ -1808,6 +1899,29 @@ async function runAgentLoop(
         }
         return false;
     }
+
+    // ── Load memory + RAG context ──────────────────────────────────────────
+    const [memTurns, ragDocs] = await Promise.all([
+        getRecentMemory(userId, 8),
+        searchRagDocs(userId, message, 3),
+    ]);
+    const memFmt  = formatMemoryContext(memTurns);
+    const ragFmt  = formatRagContext(ragDocs);
+    const memoryCtx = [
+        memFmt,
+        ragFmt ? `RELEVANT PAST TASKS:\n${ragFmt}` : '',
+    ].filter(Boolean).join('\n\n');
+
+    const usedMemory = memTurns.length > 0 || ragDocs.length > 0;
+    if (usedMemory) {
+        emit('info', `Memory: ${memTurns.length} turn(s) + ${ragDocs.length} relevant past task(s) loaded.`);
+        emitToUser(userId, 'agent:memory_used', {
+            agentId, memoryCount: memTurns.length, ragCount: ragDocs.length,
+        });
+    }
+
+    // Save user message to conversation memory
+    await saveMemoryTurn(userId, 'user', message, agentId);
 
     // Load relevant knowledge for context
     const knowledge = await getRelevantKnowledge(message, 3);
@@ -1827,7 +1941,7 @@ async function runAgentLoop(
 
     let plan: ActionPlan;
     try {
-        plan = await planWithAI(message, apiKey, model);
+        plan = await planWithAI(message, apiKey, model, memoryCtx || undefined);
     } catch (e: any) {
         emit('error', `Planning failed: ${e.message}`);
         await done(false, 'Planning failed');
@@ -1957,13 +2071,21 @@ router.post('/run', authenticateToken, async (req, res) => {
     const model = (await getSetting('nvidia_model')) || NVIDIA_DEFAULT_MODEL;
 
     try {
+        // ── Queue if user already has a running agent ─────────────────────────
+        if (isUserBusy(userId)) {
+            const queueId  = `q_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+            const position = enqueueMessage(userId, {
+                queueId, agentId: id, message, userId,
+                queuedAt: Date.now(), position: 0, apiKey, model,
+            });
+            emitToUser(userId, 'agent:queued', { agentId: id, queueId, position, message });
+            return res.json({ agentId: id, queued: true, queueId, position });
+        }
+
         // Quick check: does this request need Docker?
         emitToUser(userId, 'agent:log', { agentId: id, type: 'thinking', content: 'Checking environment…' });
 
-        // Pre-check Docker availability via a quick plan peek
-        const dockerOk = isDockerAvailable();
-
-        // For tasks that obviously need Docker but it's missing, skip the AI call
+        const dockerOk    = isDockerAvailable();
         const needsDocker = /install|deploy|run|container|docker|redis|mongo|postgres|mysql|nginx|rabbit/i.test(message);
         if (needsDocker && !dockerOk) {
             emitToUser(userId, 'agent:log', {
@@ -1974,13 +2096,18 @@ router.post('/run', authenticateToken, async (req, res) => {
             return res.json({ agentId: id, dockerMissing: true });
         }
 
+        activeAgents.set(userId, id);
         res.json({ agentId: id, started: true });
 
-        setImmediate(() => {
-            runAgentLoop(userId, id, message, apiKey, model).catch(err => {
+        setImmediate(async () => {
+            try {
+                await runAgentLoop(userId, id, message, apiKey, model);
+            } catch (err: any) {
                 emitToUser(userId, 'agent:log', { agentId: id, type: 'error', content: `Agent crashed: ${err.message}` });
                 emitToUser(userId, 'agent:done', { agentId: id, success: false, summary: 'Agent crashed' });
-            });
+            }
+            activeAgents.delete(userId);
+            await processNextInQueue(userId);
         });
     } catch (err: any) {
         const status = err?.status >= 100 && err?.status < 600 ? err.status : 500;
@@ -2070,6 +2197,58 @@ router.delete('/knowledge/:id', authenticateToken, async (req, res) => {
     try {
         await deleteKnowledge(String(req.params.id));
         res.json({ deleted: true });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Queue management ──────────────────────────────────────────────────────────
+
+router.get('/queue', authenticateToken, (req, res) => {
+    const userId = getUserId(req);
+    const items  = getUserQueue(userId).map(q => ({
+        queueId:  q.queueId,
+        agentId:  q.agentId,
+        message:  q.message,
+        position: q.position,
+        queuedAt: q.queuedAt,
+    }));
+    const runningAgentId = activeAgents.get(userId) ?? null;
+    res.json({ items, runningAgentId, total: items.length });
+});
+
+router.delete('/queue/:queueId', authenticateToken, (req, res) => {
+    const userId  = getUserId(req);
+    const queueId = String(req.params.queueId);
+    const removed = cancelQueuedItem(userId, queueId);
+    if (removed) {
+        // Notify frontend of updated positions
+        const remaining = getUserQueue(userId);
+        emitToUser(userId, 'agent:queue_update', {
+            items: remaining.map(q => ({ agentId: q.agentId, queueId: q.queueId, position: q.position })),
+        });
+        emitToUser(userId, 'agent:queue_cancelled', { queueId });
+    }
+    res.json({ removed, queueId });
+});
+
+// ── Memory & RAG management ────────────────────────────────────────────────────
+
+router.get('/memory/stats', authenticateToken, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+        const stats = await getMemoryStats(userId);
+        res.json(stats);
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.delete('/memory', authenticateToken, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+        await clearUserMemory(userId);
+        res.json({ cleared: true });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }

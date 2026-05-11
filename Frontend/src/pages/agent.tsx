@@ -7,7 +7,7 @@ import {
     Trash2, X, Zap, Sun, Moon, Container, PlugZap,
     Layers, FileText, Network, HardDrive, Wrench, Lightbulb,
     ShieldAlert, ListChecks, Eye, EyeOff, Rocket, Activity,
-    Cpu, Server, Globe,
+    Cpu, Server, Globe, Clock, BrainCircuit, ListOrdered,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +53,12 @@ interface ChatMessage {
     intent: string;
     summary: string;
     rawLogs: LogEntry[];
+    status: "running" | "queued" | "done" | "failed" | "cancelled";
+    queueId?: string;
+    queuePosition?: number;
+    usedMemory?: boolean;
+    memoryCount?: number;
+    ragCount?: number;
 }
 
 interface ConfirmRequest {
@@ -1087,46 +1093,83 @@ function RawLogToggle({ logs }: { logs: LogEntry[] }) {
 
 // ── Chat message view (one user + agent pair) ─────────────────────────────────
 
-function ChatMessageView({ message, isLast, running }: {
+function ChatMessageView({ message, isLast, running, onCancelQueue }: {
     message: ChatMessage;
     isLast: boolean;
     running: boolean;
+    onCancelQueue?: (queueId: string) => void;
 }) {
-    const isStreaming = isLast && running && !message.done;
+    const isQueued    = message.status === "queued";
+    const isStreaming = message.status === "running" && !message.done;
+
     return (
         <div className="flex flex-col gap-3">
             {/* User bubble */}
             <div className="flex justify-end">
-                <div className="max-w-[85%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed">
+                <div className="relative max-w-[85%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed">
                     {message.userText}
+                    {message.usedMemory && (
+                        <span className="absolute -bottom-2 left-2 flex items-center gap-1 text-[9px] bg-violet-500/20 text-violet-400 border border-violet-400/30 rounded-full px-1.5 py-0.5">
+                            <BrainCircuit className="w-2.5 h-2.5" />
+                            Memory
+                        </span>
+                    )}
                 </div>
             </div>
 
             {/* Agent response */}
             <div className="flex gap-2.5">
                 <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-                    {isStreaming
+                    {isQueued
+                        ? <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        : isStreaming
                         ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
                         : <Bot className="w-3.5 h-3.5 text-primary" />
                     }
                 </div>
                 <div className="flex-1 min-w-0 flex flex-col gap-2">
-                    {/* Sections — build up in real-time as logs arrive */}
-                    {message.sections.map(section => (
-                        <ResultSection key={section.id} section={section} />
-                    ))}
-
-                    {/* Typing dots while waiting for first log */}
-                    {isStreaming && message.sections.length === 0 && (
-                        <div className="flex items-center gap-1 py-2 px-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
+                    {isQueued ? (
+                        /* ── Queued waiting state ── */
+                        <div className="flex items-center gap-3 py-2 px-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                            <ListOrdered className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                                <span className="text-xs font-semibold text-amber-400">
+                                    Queued #{message.queuePosition}
+                                </span>
+                                <span className="text-xs text-muted-foreground ml-2">
+                                    — waiting for current task to finish
+                                </span>
+                            </div>
+                            {message.queueId && onCancelQueue && (
+                                <button
+                                    onClick={() => onCancelQueue(message.queueId!)}
+                                    title="Remove from queue"
+                                    className="text-muted-foreground hover:text-destructive transition-colors shrink-0 p-0.5 rounded"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            )}
                         </div>
-                    )}
+                    ) : (
+                        <>
+                            {/* Sections — build up in real-time */}
+                            {message.sections.map(section => (
+                                <ResultSection key={section.id} section={section} />
+                            ))}
 
-                    {/* Collapsible raw log after task completes */}
-                    {message.done && <RawLogToggle logs={message.rawLogs} />}
+                            {/* Typing dots while waiting for first log */}
+                            {isStreaming && message.sections.length === 0 && (
+                                <div className="flex items-center gap-1 py-2 px-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
+                                </div>
+                            )}
+
+                            {/* Raw log after task completes */}
+                            {message.done && <RawLogToggle logs={message.rawLogs} />}
+                        </>
+                    )}
                 </div>
             </div>
         </div>
@@ -1151,12 +1194,14 @@ const SUGGESTIONS = [
 
 function ChatArea({
     messages, running, dockerMissing, onInstallDocker,
-    prompt, setPrompt, onRun, onCancel, textareaRef, isMobile,
+    prompt, setPrompt, onRun, onCancel, onCancelQueue, textareaRef, isMobile, queueCount,
 }: {
     messages: ChatMessage[]; running: boolean; dockerMissing: boolean;
     onInstallDocker: () => void; prompt: string; setPrompt: (v: string) => void;
     onRun: (text?: string) => void; onCancel: () => void;
+    onCancelQueue: (queueId: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement>; isMobile: boolean;
+    queueCount: number;
 }) {
     const bottomRef = useRef<HTMLDivElement>(null);
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -1199,6 +1244,7 @@ function ChatArea({
                             message={msg}
                             isLast={i === messages.length - 1}
                             running={running}
+                            onCancelQueue={onCancelQueue}
                         />
                     ))}
 
@@ -1232,28 +1278,44 @@ function ChatArea({
                         </button>
                     ))}
                 </div>
+                {/* Queue indicator strip */}
+                {queueCount > 0 && (
+                    <div className="flex items-center gap-2 px-1 text-xs text-amber-400">
+                        <ListOrdered className="w-3.5 h-3.5 shrink-0" />
+                        <span>{queueCount} message{queueCount > 1 ? "s" : ""} waiting in queue</span>
+                    </div>
+                )}
                 <div className="flex gap-2">
                     <textarea
-                            ref={textareaRef}
-                            value={prompt}
-                            onChange={e => setPrompt(e.target.value)}
-                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onRun(); } }}
-                            placeholder="Describe a Docker task… (Enter to run, Shift+Enter for newline)"
-                            rows={2}
-                            className="flex-1 resize-none text-sm rounded-lg border border-border bg-muted/30 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground font-sans"
-                            disabled={running}
-                        />
-                        {running ? (
-                            <Button variant="destructive" size="icon" className="h-auto w-10 shrink-0 rounded-lg" onClick={onCancel}>
+                        ref={textareaRef}
+                        value={prompt}
+                        onChange={e => setPrompt(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onRun(); } }}
+                        placeholder={running
+                            ? "Type next task… it will be queued automatically"
+                            : "Describe a Docker task… (Enter to run, Shift+Enter for newline)"
+                        }
+                        rows={2}
+                        className="flex-1 resize-none text-sm rounded-lg border border-border bg-muted/30 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground font-sans"
+                    />
+                    <div className="flex flex-col gap-1">
+                        {running && (
+                            <Button variant="destructive" size="icon" className="h-9 w-10 shrink-0 rounded-lg" onClick={onCancel} title="Stop current task">
                                 <Square className="w-4 h-4" />
                             </Button>
-                        ) : (
-                            <Button size="icon" className="h-auto w-10 shrink-0 rounded-lg" onClick={() => onRun()} disabled={!prompt.trim()}>
-                                <Send className="w-4 h-4" />
-                            </Button>
                         )}
+                        <Button
+                            size="icon"
+                            className={cn("shrink-0 rounded-lg", running ? "h-9 w-10 bg-amber-500 hover:bg-amber-600 text-white" : "h-auto w-10")}
+                            onClick={() => onRun()}
+                            disabled={!prompt.trim()}
+                            title={running ? `Queue message (#${queueCount + 1})` : "Run"}
+                        >
+                            {running ? <ListOrdered className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                        </Button>
                     </div>
                 </div>
+            </div>
         </div>
     );
 }
@@ -1317,30 +1379,50 @@ export default function AgentPage() {
     const [confirmLoading, setConfirmLoading]     = useState(false);
     const [inputRequest, setInputRequest]         = useState<InputRequest | null>(null);
     const [inputLoading, setInputLoading]         = useState(false);
+    const [queueCount, setQueueCount]       = useState(0);
+    const [memoryStats, setMemoryStats]     = useState<{ memoryCount: number; ragCount: number } | null>(null);
 
     const textareaRef  = useRef<HTMLTextAreaElement>(null);
     const currentAgent = useRef<string | null>(null);
 
+    // Load memory stats on mount
+    useEffect(() => {
+        apiFetch<{ memoryCount: number; ragCount: number }>("/agent/memory/stats")
+            .then(s => setMemoryStats(s))
+            .catch(() => {});
+    }, []);
+
     useEffect(() => {
         const socket = getSocket();
+
+        // ── Find message by agentId (search from end) ─────────────────────────
+        const findIdx = (prev: ChatMessage[], agentId: string) => {
+            for (let i = prev.length - 1; i >= 0; i--) {
+                if (prev[i].id === agentId) return i;
+            }
+            return -1;
+        };
+
+        // ── Streaming log (classifies into live sections) ──────────────────────
         const onLog = (data: { agentId: string; type: LogEntry["type"]; content: string }) => {
-            if (currentAgent.current && data.agentId !== currentAgent.current) return;
-            const sec = logSectionFor(data.type);
+            const sec   = logSectionFor(data.type);
             const entry = { type: data.type, content: data.content };
             const rawLog: LogEntry = { ...entry, ts: Date.now() };
             setMessages(prev => {
-                if (prev.length === 0) return prev;
-                const last = prev[prev.length - 1];
-                const idx = last.sections.findIndex(s => s.id === sec.id);
-                const newSections: LogSection[] = idx >= 0
-                    ? last.sections.map((s, i) => i === idx ? { ...s, entries: [...s.entries, entry] } : s)
-                    : [...last.sections, { id: sec.id, title: sec.title, priority: "normal" as const, entries: [entry] }];
-                return [...prev.slice(0, -1), { ...last, sections: newSections, rawLogs: [...last.rawLogs, rawLog] }];
+                const idx = findIdx(prev, data.agentId);
+                if (idx < 0) return prev;
+                const msg   = prev[idx];
+                const sIdx  = msg.sections.findIndex(s => s.id === sec.id);
+                const newSections: LogSection[] = sIdx >= 0
+                    ? msg.sections.map((s, i) => i === sIdx ? { ...s, entries: [...s.entries, entry] } : s)
+                    : [...msg.sections, { id: sec.id, title: sec.title, priority: "normal" as const, entries: [entry] }];
+                const updated = { ...msg, sections: newSections, rawLogs: [...msg.rawLogs, rawLog] };
+                return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)];
             });
         };
+
+        // ── Task done ─────────────────────────────────────────────────────────
         const onDone = (data: { agentId: string; success: boolean; summary: string; dockerMissing?: boolean }) => {
-            if (currentAgent.current && data.agentId !== currentAgent.current) return;
-            setRunning(false);
             if (data.dockerMissing) { setDockerMissing(true); }
             else {
                 if (data.success) toast.success("Task completed");
@@ -1348,70 +1430,168 @@ export default function AgentPage() {
                 setHistoryKey(k => k + 1);
             }
             setMessages(prev => {
-                if (prev.length === 0) return prev;
-                const last = prev[prev.length - 1];
-                return [...prev.slice(0, -1), { ...last, done: true, success: data.success }];
+                const idx = findIdx(prev, data.agentId);
+                if (idx < 0) return prev;
+                const updated = {
+                    ...prev[idx],
+                    done: true,
+                    success: data.success,
+                    status: (data.success ? "done" : "failed") as ChatMessage["status"],
+                };
+                const next = [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)];
+                // Update running: true only if any message is still running
+                const stillRunning = next.some(m => m.status === "running");
+                setRunning(stillRunning);
+                return next;
             });
         };
+
+        // ── Structured result replaces live sections with final classified result
         const onStructured = (data: { agentId: string } & StructuredResult) => {
-            if (currentAgent.current && data.agentId !== currentAgent.current) return;
             setMessages(prev => {
-                if (prev.length === 0) return prev;
-                const last = prev[prev.length - 1];
-                return [...prev.slice(0, -1), {
-                    ...last,
+                const idx = findIdx(prev, data.agentId);
+                if (idx < 0) return prev;
+                const updated = {
+                    ...prev[idx],
                     sections: data.sections,
                     taskType: data.taskType,
                     intent: data.intent,
                     summary: data.summary,
                     success: data.success,
-                }];
+                };
+                return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)];
             });
         };
+
+        // ── Queue events ──────────────────────────────────────────────────────
+        const onQueued = (data: { agentId: string; queueId: string; position: number; message: string }) => {
+            setQueueCount(prev => prev + 1);
+            setMessages(prev => [...prev, {
+                id: data.agentId, userText: data.message, sections: [], done: false,
+                success: false, taskType: "general", intent: data.message, summary: "",
+                rawLogs: [], status: "queued", queueId: data.queueId, queuePosition: data.position,
+            }]);
+        };
+
+        const onDequeued = (data: { agentId: string; queueId: string }) => {
+            setQueueCount(prev => Math.max(0, prev - 1));
+            setRunning(true);
+            setMessages(prev => prev.map(m =>
+                m.id === data.agentId
+                    ? { ...m, status: "running" as ChatMessage["status"], queueId: undefined, queuePosition: undefined }
+                    : m
+            ));
+        };
+
+        const onQueueUpdate = (data: { items: { agentId: string; queueId: string; position: number }[] }) => {
+            setQueueCount(data.items.length);
+            setMessages(prev => prev.map(m => {
+                const qi = data.items.find(q => q.agentId === m.id);
+                return qi ? { ...m, queuePosition: qi.position } : m;
+            }));
+        };
+
+        const onQueueCancelled = (data: { queueId: string }) => {
+            setQueueCount(prev => Math.max(0, prev - 1));
+            setMessages(prev => prev.map(m =>
+                m.queueId === data.queueId
+                    ? { ...m, status: "cancelled" as ChatMessage["status"], done: true }
+                    : m
+            ));
+        };
+
+        // ── Memory used notification ───────────────────────────────────────────
+        const onMemoryUsed = (data: { agentId: string; memoryCount: number; ragCount: number }) => {
+            setMessages(prev => prev.map(m =>
+                m.id === data.agentId
+                    ? { ...m, usedMemory: true, memoryCount: data.memoryCount, ragCount: data.ragCount }
+                    : m
+            ));
+            // Refresh memory stats
+            apiFetch<{ memoryCount: number; ragCount: number }>("/agent/memory/stats")
+                .then(s => setMemoryStats(s)).catch(() => {});
+        };
+
         const onConfirmRequired = (data: { agentId: string; title: string; message: string; showNewPortOption?: boolean }) => {
-            if (currentAgent.current && data.agentId !== currentAgent.current) return;
             setConfirmRequest({ agentId: data.agentId, title: data.title, message: data.message, showNewPortOption: data.showNewPortOption });
         };
         const onInputRequired = (data: InputRequest) => {
-            if (currentAgent.current && data.agentId !== currentAgent.current) return;
             setInputRequest(data);
         };
-        socket.on("agent:log", onLog);
-        socket.on("agent:done", onDone);
-        socket.on("agent:structured_result", onStructured);
+
+        socket.on("agent:log",              onLog);
+        socket.on("agent:done",             onDone);
+        socket.on("agent:structured_result",onStructured);
+        socket.on("agent:queued",           onQueued);
+        socket.on("agent:dequeued",         onDequeued);
+        socket.on("agent:queue_update",     onQueueUpdate);
+        socket.on("agent:queue_cancelled",  onQueueCancelled);
+        socket.on("agent:memory_used",      onMemoryUsed);
         socket.on("agent:confirm_required", onConfirmRequired);
-        socket.on("agent:input_required", onInputRequired);
+        socket.on("agent:input_required",   onInputRequired);
+
         return () => {
-            socket.off("agent:log", onLog);
-            socket.off("agent:done", onDone);
-            socket.off("agent:structured_result", onStructured);
+            socket.off("agent:log",              onLog);
+            socket.off("agent:done",             onDone);
+            socket.off("agent:structured_result",onStructured);
+            socket.off("agent:queued",           onQueued);
+            socket.off("agent:dequeued",         onDequeued);
+            socket.off("agent:queue_update",     onQueueUpdate);
+            socket.off("agent:queue_cancelled",  onQueueCancelled);
+            socket.off("agent:memory_used",      onMemoryUsed);
             socket.off("agent:confirm_required", onConfirmRequired);
-            socket.off("agent:input_required", onInputRequired);
+            socket.off("agent:input_required",   onInputRequired);
         };
     }, []);
 
     const run = useCallback(async (text?: string) => {
         const msg = (text ?? prompt).trim();
-        if (!msg || running) return;
-        setRunning(true); setDockerMissing(false); setPrompt("");
-        setOpenSheet(null);
+        if (!msg) return;
+        setDockerMissing(false); setPrompt(""); setOpenSheet(null);
         const id = `ag_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         currentAgent.current = id; setAgentId(id);
+        // Pre-add message (will be updated to 'queued' or 'running' by response)
         setMessages(prev => [...prev, {
             id, userText: msg, sections: [], done: false,
             success: false, taskType: "general", intent: msg, summary: "", rawLogs: [],
+            status: "running" as ChatMessage["status"],
         }]);
         try {
             const res = await apiFetch<any>("/agent/run", { method: "POST", body: JSON.stringify({ message: msg, agentId: id }) });
-            if (res.dockerMissing) { setDockerMissing(true); setRunning(false); }
-        } catch (e: any) { toast.error(e.message || "Failed to start agent"); setRunning(false); }
-    }, [prompt, running]);
+            if (res.dockerMissing) {
+                setDockerMissing(true);
+            } else if (res.queued) {
+                // Backend will emit agent:queued — but we already added the message above.
+                // Update it to reflect queued state with correct position
+                setMessages(prev => prev.map(m =>
+                    m.id === id
+                        ? { ...m, status: "queued" as ChatMessage["status"], queueId: res.queueId, queuePosition: res.position }
+                        : m
+                ));
+                setQueueCount(prev => prev + 1);
+            } else if (res.started) {
+                setRunning(true);
+            }
+        } catch (e: any) {
+            toast.error(e.message || "Failed to start agent");
+            setMessages(prev => prev.map(m => m.id === id ? { ...m, done: true, status: "failed" as ChatMessage["status"] } : m));
+        }
+    }, [prompt]);
 
     const cancel = useCallback(async () => {
         if (!agentId) return;
         try { await apiFetch("/agent/cancel", { method: "POST", body: JSON.stringify({ agentId }) }); setRunning(false); }
         catch { }
     }, [agentId]);
+
+    const cancelQueuedMessage = useCallback(async (queueId: string) => {
+        try {
+            await apiFetch(`/agent/queue/${queueId}`, { method: "DELETE" });
+            // onQueueCancelled socket event will update state
+        } catch (e: any) {
+            toast.error("Failed to remove from queue");
+        }
+    }, []);
 
     const installDocker = useCallback(async () => {
         setDockerMissing(false); setRunning(true);
@@ -1485,7 +1665,9 @@ export default function AgentPage() {
     const chatProps = {
         messages, running, dockerMissing, onInstallDocker: installDocker,
         prompt, setPrompt, onRun: run, onCancel: cancel,
+        onCancelQueue: cancelQueuedMessage,
         textareaRef, isMobile: !!isMobile,
+        queueCount,
     };
 
     return (
@@ -1520,6 +1702,16 @@ export default function AgentPage() {
                             </div>
                             <h1 className="font-semibold text-sm tracking-tight">DevOps Agent</h1>
                             <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-primary/10 text-primary border-primary/20">AI</Badge>
+                            {queueCount > 0 && (
+                                <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-amber-500/10 text-amber-400 border-amber-400/30 flex items-center gap-1">
+                                    <ListOrdered className="w-2.5 h-2.5" />{queueCount} queued
+                                </Badge>
+                            )}
+                            {memoryStats && (memoryStats.memoryCount > 0 || memoryStats.ragCount > 0) && (
+                                <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-violet-500/10 text-violet-400 border-violet-400/30 flex items-center gap-1" title={`${memoryStats.memoryCount} memory turns · ${memoryStats.ragCount} RAG entries`}>
+                                    <BrainCircuit className="w-2.5 h-2.5" />Memory
+                                </Badge>
+                            )}
                         </div>
                         <div className="flex items-center gap-2">
                             <Button
