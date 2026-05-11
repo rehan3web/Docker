@@ -1,18 +1,14 @@
 import Redis from 'ioredis';
 
-// ── Always connects to the docklet-redis service defined in postgres.yml ──────
-// No env var needed — the service name resolves automatically on the Docker
-// network. In non-Docker environments (local dev, Replit) the connection will
-// fail gracefully and caching is silently disabled.
-const REDIS_URL = 'redis://docklet-redis:6379';
-
 let client: Redis | null = null;
 let lastError: string | null = null;
 let initialized = false;
 
 export function getRedis(): Redis {
     if (client) return client;
-    client = new Redis(REDIS_URL, {
+    const url = process.env.REDIS_URL;
+    if (!url) throw new Error('REDIS_URL not configured');
+    client = new Redis(url, {
         maxRetriesPerRequest: 1,
         connectTimeout: 5000,
         commandTimeout: 3000,
@@ -103,11 +99,15 @@ export async function getStatsHistory(): Promise<any[]> {
 export function initRedis(): void {
     if (initialized) return;
     initialized = true;
+    if (!process.env.REDIS_URL) {
+        console.log('[Redis] REDIS_URL not set — caching disabled');
+        return;
+    }
     try {
         getRedis().connect()
-            .then(() => console.log('[Redis] Connected to docklet-redis'))
-            .catch((e: any) => console.log('[Redis] Not available (non-Docker env) — caching disabled'));
+            .then(() => console.log('[Redis] Connected'))
+            .catch((e: any) => console.warn('[Redis] Connect failed:', e.message));
     } catch (e: any) {
-        console.log('[Redis] Not available — caching disabled');
+        console.warn('[Redis] Init error:', e.message);
     }
 }
