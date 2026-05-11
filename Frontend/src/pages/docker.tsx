@@ -145,7 +145,7 @@ function ContainerCard({
             <>
               <span className="text-muted-foreground/40 text-[10px]">·</span>
               <span className="text-[10px] font-mono text-muted-foreground truncate">
-                {container.ports.slice(0, 2).map((p: any) => p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`).join(", ")}
+                {container.ports.slice(0, 2).map((p: any) => p.publicPort ? `${p.publicPort}:${p.privatePort}` : `${p.privatePort}`).join(", ")}
                 {container.ports.length > 2 && ` +${container.ports.length - 2}`}
               </span>
             </>
