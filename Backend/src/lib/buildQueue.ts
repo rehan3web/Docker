@@ -59,6 +59,7 @@ export interface DeployRecord {
     hostPort?: number;
     containerPort?: number;
     containerName?: string;
+    proxyNetwork?: string;    // set for railpack containers routed via Traefik
     logs: { stream: 'stdout' | 'stderr' | 'system'; chunk: string; timestamp: number }[];
 }
 
@@ -326,6 +327,7 @@ async function ensureBuildKit(id: string): Promise<void> {
 
 // ── Build logic ───────────────────────────────────────────────────────────────
 
+// Read the first EXPOSE from a Dockerfile
 function parseExposedPort(dockerfilePath: string): number | null {
     try {
         let last: number | null = null;
@@ -334,6 +336,20 @@ function parseExposedPort(dockerfilePath: string): number | null {
             if (m) last = parseInt(m[1], 10);
         }
         return last;
+    } catch { return null; }
+}
+
+// Read the first exposed port from a built Docker image (for railpack images
+// that have no Dockerfile to parse — we inspect the image metadata instead)
+function inspectExposedPort(imageTag: string): number | null {
+    try {
+        const raw = execSync(
+            `docker inspect --format '{{range $p, $_ := .Config.ExposedPorts}}{{$p}} {{end}}' ${imageTag}`,
+            { stdio: 'pipe', env: process.env }
+        ).toString().trim();
+        // raw looks like "80/tcp 443/tcp" — take the first numeric port
+        const m = raw.match(/(\d+)\//);
+        return m ? parseInt(m[1], 10) : null;
     } catch { return null; }
 }
 
@@ -432,7 +448,20 @@ async function runBuild(id: string) {
             }
 
             emitLog(id, 'system', '\nRailPack build complete — starting container\n');
-            await _startContainer(id, record, containerName, imageTag, null, null);
+
+            // Detect the port the image exposes (railpack bakes this in)
+            const rpPort = inspectExposedPort(imageTag);
+            if (rpPort) {
+                record.containerPort = rpPort;
+                emitLog(id, 'system', `Detected container port ${rpPort} — routing via Traefik (docklet-apps network)\n`);
+            } else {
+                emitLog(id, 'system', 'No exposed port detected — container will run without port routing\n');
+            }
+
+            // Railpack containers join the Traefik network so the Reverse Proxy
+            // Manager can route a domain → http://containerName:containerPort
+            // without needing a host port binding.
+            await _startContainer(id, record, containerName, imageTag, null, rpPort, 'docklet-apps');
         }
 
     } catch (err: any) {
@@ -448,13 +477,16 @@ async function _startContainer(
     id: string, record: DeployRecord,
     containerName: string, imageTag: string,
     hostPort: number | null, containerPort: number | null,
+    network?: string,   // optional Docker network to join (railpack → 'docklet-apps')
 ) {
     emitStatus(id, 'running');
     emitLog(id, 'system', `\nStarting container ${containerName}\n`);
     record.containerName = containerName;
+    if (network) record.proxyNetwork = network;
 
     const runArgs = ['run', '-d', '--name', containerName];
-    if (hostPort && containerPort) runArgs.push('-p', `${hostPort}:${containerPort}`);
+    if (network)                      runArgs.push('--network', network);
+    if (hostPort && containerPort)    runArgs.push('-p', `${hostPort}:${containerPort}`);
     runArgs.push(imageTag);
 
     const runCode = await runStreamed(id, 'docker', runArgs, DEPLOY_ROOT);
@@ -472,9 +504,17 @@ async function _startContainer(
 
     record.status     = 'success';
     record.finishedAt = Date.now();
-    const portMsg     = hostPort ? ` — accessible on host port ${hostPort}` : '';
-    emitLog(id, 'system', `\nDeployment successful: container ${containerName} is running${portMsg}.\n`);
-    emitStatus(id, 'success', { containerName, imageTag, hostPort, containerPort, buildMethod: record.buildMethod });
+
+    let accessMsg: string;
+    if (hostPort) {
+        accessMsg = ` — accessible on host port ${hostPort}`;
+    } else if (network && containerPort) {
+        accessMsg = ` — on network ${network}, internal port ${containerPort}`;
+    } else {
+        accessMsg = '';
+    }
+    emitLog(id, 'system', `\nDeployment successful: container ${containerName} is running${accessMsg}.\n`);
+    emitStatus(id, 'success', { containerName, imageTag, hostPort, containerPort, proxyNetwork: record.proxyNetwork, buildMethod: record.buildMethod });
 }
 
 // ── Queue system ──────────────────────────────────────────────────────────────

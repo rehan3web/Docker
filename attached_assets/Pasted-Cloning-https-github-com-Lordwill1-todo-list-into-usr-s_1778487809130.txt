@@ -1,0 +1,100 @@
+Cloning https://github.com/Lordwill1/todo-list into /usr/src/app/.docklet-deploys/todo-list-dep_1778487477271_kxujpa
+
+$ git clone --depth 1 https://github.com/Lordwill1/todo-list /usr/src/app/.docklet-deploys/todo-list-dep_1778487477271_kxujpa
+Cloning into '/usr/src/app/.docklet-deploys/todo-list-dep_1778487477271_kxujpa'...
+
+No Dockerfile found → using RailPack auto-detect build
+mise 2026.3.17 ready
+railpack already installed
+BuildKit host: docker-container://docklet-buildkit
+
+RailPack auto-detecting runtime and building image docklet-todo-list-dep_1778487477271_kxujpa...
+
+$ railpack build --name docklet-todo-list-dep_1778487477271_kxujpa --progress plain .
+                   
+╭─────────────────╮
+│ Railpack 0.23.0 │
+╰─────────────────╯
+
+  ↳ Detected Staticfile
+  ↳ Using staticfile root dir: .
+            
+  Packages  
+  ──────────
+  caddy  │  2.11.2  │  railpack default (2)
+            
+  Steps     
+  ──────────
+  ▸ build
+    $ caddy fmt --overwrite Caddyfile
+            
+  Deploy    
+  ──────────
+    $ caddy run --config Caddyfile --adapter caddyfile 2>&1
+
+#1 loading .
+#1 DONE 0.0s
+
+#2 [railpack] secrets hash
+#2 DONE 0.0s
+
+#3 docker-image://ghcr.io/railwayapp/railpack-builder:mise-2026.3.17
+#3 resolve ghcr.io/railwayapp/railpack-builder:mise-2026.3.17
+#3 resolve ghcr.io/railwayapp/railpack-builder:mise-2026.3.17 0.3s done
+#3 DONE 0.3s
+
+#4 docker-image://ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17
+#4 resolve ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17 0.3s done
+#4 CACHED
+
+#5 copy /railpack/caddy
+#5 CACHED
+
+#2 [railpack] secrets hash
+#2 CACHED
+
+#6 mise install-into caddy@2.11.2 /railpack/caddy
+#6 CACHED
+
+#1 loading .
+#1 transferring context: 53.50kB 0.0s done
+#1 DONE 0.0s
+
+#7 copy / /app
+#7 DONE 0.0s
+
+#8 mkdir /app
+#8 DONE 0.0s
+
+#9 mkfile /app/Caddyfile
+#9 DONE 0.0s
+
+#10 caddy fmt --overwrite Caddyfile
+#10 DONE 0.1s
+
+#11 copy /app
+#11 DONE 0.0s
+
+#12 [railpack] merge ghcr.io/railwayapp/railpack-runtime:mise-2026.3.17, $packages:caddy, $build
+#12 DONE 0.0s
+
+#13 exporting to docker image format
+#13 exporting layers
+#13 exporting layers 3.1s done
+#13 exporting manifest sha256:bea712d504293f73b0384c11f32ab921880cc09a2686c64685e0778fdc94bfb2 0.0s done
+#13 exporting config sha256:78ac44e8065d3ca504345e78e2fc3dfee0cd0a738f7431e11a335b63b8e0c173 0.0s done
+#13 sending tarball
+#13 sending tarball 2.2s done
+#13 DONE 5.4s
+Loaded image: docklet-todo-list-dep_1778487477271_kxujpa:latest
+ INFO Successfully built image in 8.53s
+ INFO Run with `docker run -it docklet-todo-list-dep_1778487477271_kxujpa`
+
+RailPack build complete — starting container
+
+Starting container nb-todo-list-dep_1778487477271_kxujpa
+
+$ docker run -d --name nb-todo-list-dep_1778487477271_kxujpa docklet-todo-list-dep_1778487477271_kxujpa
+4d7a088cfdca563c7a23fc044fa04c8f54800786d66655178af08f0e9ca00101
+
+Deployment successful: container nb-todo-list-dep_1778487477271_kxujpa is running.

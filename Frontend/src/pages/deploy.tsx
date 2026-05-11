@@ -264,6 +264,9 @@ export default function DeployPage() {
                         {d.hostPort && d.containerPort && (
                           <p className="font-mono text-[10px] text-primary/80 mt-0.5">:{d.hostPort} → :{d.containerPort}</p>
                         )}
+                        {!d.hostPort && d.containerPort && d.proxyNetwork && (
+                          <p className="font-mono text-[10px] text-violet-400 mt-0.5">Traefik :{d.containerPort}</p>
+                        )}
                         <p className="font-mono text-[10px] text-muted-foreground mt-0.5">{format(new Date(d.startedAt), "MMM dd, HH:mm:ss")}</p>
                       </button>
                     ))

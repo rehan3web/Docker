@@ -34,7 +34,7 @@ router.get('/list', authenticateToken, (req, res) => {
                 id: d.id, repo: d.repo, name: d.name, status: d.status,
                 buildMethod: d.buildMethod, queuePosition: d.queuePosition,
                 startedAt: d.startedAt, finishedAt: d.finishedAt, error: d.error,
-                hostPort: d.hostPort, containerPort: d.containerPort, containerName: d.containerName,
+                hostPort: d.hostPort, containerPort: d.containerPort, containerName: d.containerName, proxyNetwork: d.proxyNetwork,
             })),
     });
 });

@@ -645,6 +645,7 @@ export type DeploySummary = {
   hostPort?: number;
   containerPort?: number;
   containerName?: string;
+  proxyNetwork?: string;
 };
 
 export function useGetDeployments() {
