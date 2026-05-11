@@ -140,7 +140,7 @@ export default function TwoFASetupOverlay() {
                         <form onSubmit={handleEnable} className="p-6 space-y-5">
                             <div className="flex flex-col items-center gap-3">
                                 <div className="p-2 bg-white rounded-xl border border-border shadow-sm">
-                                    <img src={qrDataUrl} alt="2FA QR Code" className="w-44 h-44" />
+                                    <img src={qrDataUrl} alt="2FA QR Code" className="w-56 h-56" />
                                 </div>
                                 <p className="text-[11px] text-muted-foreground text-center">
                                     Scan this QR code with your authenticator app

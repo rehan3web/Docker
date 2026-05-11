@@ -20,18 +20,18 @@ function totpVerify(secret: string, code: string): boolean {
         secret,
         encoding: 'base32',
         token: code.replace(/\s/g, ''),
-        window: 1,
+        window: 2,
     });
 }
 
 function makeQR(username: string, secret: string): Promise<string> {
     const otpauth = speakeasy.otpauthURL({
         secret,
-        label: `${APP_NAME}:${username}`,
+        label: `${APP_NAME}:${encodeURIComponent(username)}`,
         issuer: APP_NAME,
         encoding: 'base32',
     });
-    return QRCode.toDataURL(otpauth, { width: 200 });
+    return QRCode.toDataURL(otpauth, { width: 400, errorCorrectionLevel: 'M' });
 }
 
 // ── Rate limiter for OTP endpoints ────────────────────────────────────────────

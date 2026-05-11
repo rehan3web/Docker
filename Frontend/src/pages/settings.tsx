@@ -495,7 +495,7 @@ function TwoFASection() {
                             <div className="flex gap-6 flex-wrap">
                                 <div className="flex flex-col items-center gap-2">
                                     <div className="p-2 bg-white rounded-xl border border-border shadow-sm">
-                                        <img src={qrDataUrl} alt="2FA QR Code" className="w-40 h-40" />
+                                        <img src={qrDataUrl} alt="2FA QR Code" className="w-56 h-56" />
                                     </div>
                                     <p className="text-[11px] text-muted-foreground text-center">Scan with your authenticator app</p>
                                 </div>
@@ -575,7 +575,7 @@ function TwoFASection() {
                             <div className="flex gap-6 flex-wrap">
                                 <div className="flex flex-col items-center gap-2">
                                     <div className="p-2 bg-white rounded-xl border border-border shadow-sm">
-                                        <img src={qrDataUrl} alt="2FA QR Code" className="w-40 h-40" />
+                                        <img src={qrDataUrl} alt="2FA QR Code" className="w-56 h-56" />
                                     </div>
                                     <p className="text-[11px] text-muted-foreground text-center">Scan with your authenticator app</p>
                                 </div>
