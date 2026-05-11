@@ -66,6 +66,19 @@ services:
     profiles:
       - expose
 
+  redis:
+    container_name: docklet-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --loglevel warning --save 60 1 --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   docklet-server:
     container_name: docklet-server
     build:
@@ -78,6 +91,8 @@ services:
     depends_on:
       pgbouncer:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       # ── PostgreSQL connection — app queries go through PgBouncer pooler ─────────
       PGHOST:     pgbouncer
@@ -99,7 +114,8 @@ services:
       SELF_CONTAINER_NAME: docklet-server
       # ── Optional features ────────────────────────────────────────
       ENABLE_2FA: ${ENABLE_2FA:-false}
-      REDIS_URL:  ${REDIS_URL:-}
+      # ── Redis — auto-started as docklet-redis in this compose stack ──────────
+      REDIS_URL: redis://docklet-redis:6379
     volumes:
       # Docker socket — required for pg_dump via docker exec
       - /var/run/docker.sock:/var/run/docker.sock
@@ -185,6 +201,7 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
 
 networks:
   apps:
