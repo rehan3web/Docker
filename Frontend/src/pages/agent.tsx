@@ -49,6 +49,24 @@ interface ConfirmRequest {
     message: string;
 }
 
+interface InputFieldSpec {
+    id: string;
+    label: string;
+    type: "text" | "password" | "port" | "select";
+    placeholder?: string;
+    default?: string;
+    required: boolean;
+    hint?: string;
+    options?: { label: string; value: string }[];
+}
+
+interface InputRequest {
+    agentId: string;
+    title: string;
+    description: string;
+    fields: InputFieldSpec[];
+}
+
 interface AgentTask {
     id: string;
     intent: string;
@@ -630,6 +648,153 @@ function BottomSheet({ open, title, icon, onClose, children }: {
     );
 }
 
+// ── DB setup input modal ──────────────────────────────────────────────────────
+
+const DB_ICONS: Record<string, React.ReactNode> = {
+    PostgreSQL:    <Database className="w-5 h-5 text-blue-400" />,
+    MySQL:         <Database className="w-5 h-5 text-orange-400" />,
+    MariaDB:       <Database className="w-5 h-5 text-cyan-400" />,
+    MongoDB:       <Database className="w-5 h-5 text-emerald-400" />,
+    Redis:         <Cpu className="w-5 h-5 text-red-400" />,
+    Elasticsearch: <Search className="w-5 h-5 text-yellow-400" />,
+    Cassandra:     <Database className="w-5 h-5 text-violet-400" />,
+    MinIO:         <HardDrive className="w-5 h-5 text-amber-400" />,
+};
+
+function AgentInputModal({
+    request,
+    onSubmit,
+    onCancel,
+    loading,
+}: {
+    request: InputRequest;
+    onSubmit: (values: Record<string, string>) => void;
+    onCancel: () => void;
+    loading: boolean;
+}) {
+    const [values, setValues] = useState<Record<string, string>>(() => {
+        const init: Record<string, string> = {};
+        request.fields.forEach(f => { init[f.id] = f.default ?? ""; });
+        return init;
+    });
+    const [showPw, setShowPw] = useState<Record<string, boolean>>({});
+    const [errors, setErrors] = useState<Record<string, string>>({});
+
+    const dbKey = request.title.split(" ")[0];
+    const icon = DB_ICONS[dbKey] ?? <Database className="w-5 h-5 text-primary" />;
+
+    function validate() {
+        const e: Record<string, string> = {};
+        request.fields.forEach(f => {
+            if (f.required && !values[f.id]?.trim()) e[f.id] = "Required";
+        });
+        setErrors(e);
+        return Object.keys(e).length === 0;
+    }
+
+    function handleSubmit(ev: React.FormEvent) {
+        ev.preventDefault();
+        if (validate()) onSubmit(values);
+    }
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-xl border border-border bg-background shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+                {/* Header */}
+                <div className="flex items-start gap-3 px-5 pt-5 pb-4 border-b border-border bg-muted/20 shrink-0">
+                    <div className="p-2 rounded-lg bg-primary/10 border border-primary/20 shrink-0">{icon}</div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground">{request.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{request.description}</p>
+                    </div>
+                    <button onClick={onCancel} className="text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-0.5">
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {/* Fields */}
+                <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+                    <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1">
+                        {request.fields.map(field => (
+                            <div key={field.id} className="space-y-1.5">
+                                <label className="text-xs font-medium text-foreground flex items-center gap-1">
+                                    {field.label}
+                                    {field.required && <span className="text-destructive">*</span>}
+                                </label>
+
+                                {field.type === "select" ? (
+                                    <div className="grid grid-cols-1 gap-1.5">
+                                        {field.options?.map(opt => (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                onClick={() => setValues(v => ({ ...v, [field.id]: opt.value }))}
+                                                className={cn(
+                                                    "text-left px-3 py-2.5 rounded-lg border text-sm transition-all",
+                                                    values[field.id] === opt.value
+                                                        ? "border-primary bg-primary/10 text-foreground"
+                                                        : "border-border bg-muted/20 text-muted-foreground hover:border-primary/40 hover:bg-muted/40"
+                                                )}
+                                            >
+                                                <span className="font-medium">{opt.label}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="relative">
+                                        <input
+                                            type={field.type === "password" && !showPw[field.id] ? "password" : "text"}
+                                            value={values[field.id] ?? ""}
+                                            onChange={e => {
+                                                setValues(v => ({ ...v, [field.id]: e.target.value }));
+                                                if (errors[field.id]) setErrors(e2 => ({ ...e2, [field.id]: "" }));
+                                            }}
+                                            placeholder={field.placeholder}
+                                            inputMode={field.type === "port" ? "numeric" : "text"}
+                                            className={cn(
+                                                "w-full h-9 rounded-lg border bg-muted/30 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground",
+                                                field.type === "password" ? "pr-9" : "",
+                                                errors[field.id] ? "border-destructive" : "border-border"
+                                            )}
+                                        />
+                                        {field.type === "password" && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPw(s => ({ ...s, [field.id]: !s[field.id] }))}
+                                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                            >
+                                                {showPw[field.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {field.hint && !errors[field.id] && (
+                                    <p className="text-[11px] text-muted-foreground">{field.hint}</p>
+                                )}
+                                {errors[field.id] && (
+                                    <p className="text-[11px] text-destructive">{errors[field.id]}</p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 px-5 pb-5 pt-3 border-t border-border shrink-0">
+                        <Button type="button" variant="outline" className="flex-1 h-9 gap-1.5" onClick={onCancel} disabled={loading}>
+                            <X className="w-3.5 h-3.5" />Cancel
+                        </Button>
+                        <Button type="submit" className="flex-1 h-9 gap-1.5" disabled={loading}>
+                            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                            Set Up Database
+                        </Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
 // ── Destructive-action confirmation modal ─────────────────────────────────────
 
 function AgentConfirmModal({
@@ -1091,6 +1256,8 @@ export default function AgentPage() {
     const [structuredResult, setStructuredResult] = useState<StructuredResult | null>(null);
     const [confirmRequest, setConfirmRequest]     = useState<ConfirmRequest | null>(null);
     const [confirmLoading, setConfirmLoading]     = useState(false);
+    const [inputRequest, setInputRequest]         = useState<InputRequest | null>(null);
+    const [inputLoading, setInputLoading]         = useState(false);
 
     const textareaRef  = useRef<HTMLTextAreaElement>(null);
     const currentAgent = useRef<string | null>(null);
@@ -1122,15 +1289,21 @@ export default function AgentPage() {
             if (currentAgent.current && data.agentId !== currentAgent.current) return;
             setConfirmRequest({ agentId: data.agentId, title: data.title, message: data.message });
         };
+        const onInputRequired = (data: InputRequest) => {
+            if (currentAgent.current && data.agentId !== currentAgent.current) return;
+            setInputRequest(data);
+        };
         socket.on("agent:log", onLog);
         socket.on("agent:done", onDone);
         socket.on("agent:structured_result", onStructured);
         socket.on("agent:confirm_required", onConfirmRequired);
+        socket.on("agent:input_required", onInputRequired);
         return () => {
             socket.off("agent:log", onLog);
             socket.off("agent:done", onDone);
             socket.off("agent:structured_result", onStructured);
             socket.off("agent:confirm_required", onConfirmRequired);
+            socket.off("agent:input_required", onInputRequired);
         };
     }, []);
 
@@ -1197,6 +1370,33 @@ export default function AgentPage() {
         setConfirmRequest(null);
     }, [confirmRequest]);
 
+    const sendInput = useCallback(async (values: Record<string, string>) => {
+        if (!inputRequest) return;
+        setInputLoading(true);
+        try {
+            await apiFetch("/agent/input", {
+                method: "POST",
+                body: JSON.stringify({ agentId: inputRequest.agentId, values }),
+            });
+        } catch { /* non-fatal */ }
+        setInputLoading(false);
+        setInputRequest(null);
+    }, [inputRequest]);
+
+    const cancelInput = useCallback(async () => {
+        if (!inputRequest) return;
+        setInputLoading(true);
+        try {
+            await apiFetch("/agent/input", {
+                method: "POST",
+                body: JSON.stringify({ agentId: inputRequest.agentId, values: null }),
+            });
+        } catch { /* non-fatal */ }
+        setInputLoading(false);
+        setInputRequest(null);
+        setRunning(false);
+    }, [inputRequest]);
+
     const chatProps = {
         logs, running, dockerMissing, onInstallDocker: installDocker,
         prompt, setPrompt, onRun: run, onCancel: cancel,
@@ -1206,6 +1406,14 @@ export default function AgentPage() {
 
     return (
         <div className="min-h-screen bg-background text-foreground flex">
+            {inputRequest && (
+                <AgentInputModal
+                    request={inputRequest}
+                    onSubmit={sendInput}
+                    onCancel={cancelInput}
+                    loading={inputLoading}
+                />
+            )}
             {confirmRequest && (
                 <AgentConfirmModal
                     request={confirmRequest}

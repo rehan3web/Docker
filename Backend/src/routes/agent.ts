@@ -600,6 +600,146 @@ function streamCommand(
     });
 }
 
+// ── DB setup input gate ───────────────────────────────────────────────────────
+
+interface InputField {
+    id: string;
+    label: string;
+    type: 'text' | 'password' | 'port' | 'select';
+    placeholder?: string;
+    default?: string;
+    required: boolean;
+    hint?: string;
+    options?: { label: string; value: string }[];
+}
+
+interface DbSpec { title: string; description: string; fields: InputField[] }
+
+const ACCESS_FIELD: InputField = {
+    id: 'access', label: 'Network Access', type: 'select', required: true, default: 'private',
+    hint: 'Private = internal Docker network only. Public = host port exposed.',
+    options: [
+        { label: 'Private — internal only (recommended)', value: 'private' },
+        { label: 'Public — expose port to host',           value: 'public'  },
+    ],
+};
+
+const DB_INPUT_SPECS: Record<string, DbSpec> = {
+    postgres: {
+        title: 'PostgreSQL Setup', description: 'Enter your database credentials and port. These will be used verbatim.',
+        fields: [
+            { id: 'db_name',  label: 'Database Name', type: 'text',     placeholder: 'myapp',    required: true  },
+            { id: 'username', label: 'Username',       type: 'text',     placeholder: 'myuser',   required: true  },
+            { id: 'password', label: 'Password',       type: 'password', placeholder: '••••••••', required: true  },
+            { id: 'port',     label: 'Port',           type: 'port',     placeholder: '5432',     required: true,  default: '5432' },
+            ACCESS_FIELD,
+        ],
+    },
+    mysql: {
+        title: 'MySQL Setup', description: 'Enter your database credentials and port.',
+        fields: [
+            { id: 'db_name',       label: 'Database Name',  type: 'text',     placeholder: 'myapp',    required: true  },
+            { id: 'root_password', label: 'Root Password',  type: 'password', placeholder: '••••••••', required: true  },
+            { id: 'username',      label: 'App Username',   type: 'text',     placeholder: 'myuser',   required: false, hint: 'Optional — leave blank to skip' },
+            { id: 'password',      label: 'App Password',   type: 'password', placeholder: '••••••••', required: false },
+            { id: 'port',          label: 'Port',           type: 'port',     placeholder: '3306',     required: true,  default: '3306' },
+            ACCESS_FIELD,
+        ],
+    },
+    mariadb: {
+        title: 'MariaDB Setup', description: 'Enter your database credentials and port.',
+        fields: [
+            { id: 'db_name',       label: 'Database Name',  type: 'text',     placeholder: 'myapp',    required: true  },
+            { id: 'root_password', label: 'Root Password',  type: 'password', placeholder: '••••••••', required: true  },
+            { id: 'username',      label: 'App Username',   type: 'text',     placeholder: 'myuser',   required: false, hint: 'Optional' },
+            { id: 'password',      label: 'App Password',   type: 'password', placeholder: '••••••••', required: false },
+            { id: 'port',          label: 'Port',           type: 'port',     placeholder: '3306',     required: true,  default: '3306' },
+            ACCESS_FIELD,
+        ],
+    },
+    mongodb: {
+        title: 'MongoDB Setup', description: 'Enter your MongoDB credentials and port.',
+        fields: [
+            { id: 'db_name',  label: 'Database Name', type: 'text',     placeholder: 'myapp',    required: true  },
+            { id: 'username', label: 'Username',       type: 'text',     placeholder: 'admin',    required: true  },
+            { id: 'password', label: 'Password',       type: 'password', placeholder: '••••••••', required: true  },
+            { id: 'port',     label: 'Port',           type: 'port',     placeholder: '27017',    required: true,  default: '27017' },
+            ACCESS_FIELD,
+        ],
+    },
+    redis: {
+        title: 'Redis Setup', description: 'Configure your Redis instance.',
+        fields: [
+            { id: 'password', label: 'Password', type: 'password', placeholder: 'Leave blank for no auth', required: false, hint: 'Optional — blank = no authentication' },
+            { id: 'port',     label: 'Port',     type: 'port',     placeholder: '6379', required: true, default: '6379' },
+            ACCESS_FIELD,
+        ],
+    },
+    elasticsearch: {
+        title: 'Elasticsearch Setup', description: 'Configure your Elasticsearch instance.',
+        fields: [
+            { id: 'password', label: 'Elastic Password', type: 'password', placeholder: '••••••••', required: true  },
+            { id: 'port',     label: 'HTTP Port',        type: 'port',     placeholder: '9200',     required: true,  default: '9200' },
+            ACCESS_FIELD,
+        ],
+    },
+    cassandra: {
+        title: 'Cassandra Setup', description: 'Configure your Cassandra instance.',
+        fields: [
+            { id: 'username', label: 'Username', type: 'text',     placeholder: 'cassandra', required: true  },
+            { id: 'password', label: 'Password', type: 'password', placeholder: '••••••••',  required: true  },
+            { id: 'port',     label: 'CQL Port', type: 'port',     placeholder: '9042',       required: true,  default: '9042' },
+            ACCESS_FIELD,
+        ],
+    },
+    minio: {
+        title: 'MinIO Setup', description: 'Configure your MinIO instance.',
+        fields: [
+            { id: 'root_user',     label: 'Root Username', type: 'text',     placeholder: 'minioadmin', required: true  },
+            { id: 'root_password', label: 'Root Password', type: 'password', placeholder: '••••••••',   required: true  },
+            { id: 'port',          label: 'API Port',      type: 'port',     placeholder: '9000',        required: true,  default: '9000' },
+            { id: 'console_port',  label: 'Console Port',  type: 'port',     placeholder: '9001',        required: true,  default: '9001' },
+            ACCESS_FIELD,
+        ],
+    },
+};
+
+/** Detect if the user message is asking to install/setup a specific database */
+function detectDbSetup(message: string): string | null {
+    const l = message.toLowerCase();
+    const isSetupIntent = /install|setup|create|deploy|run|start|spin.?up|add|configure/.test(l);
+    if (!isSetupIntent) return null;
+    if (/postgres(ql)?/.test(l))        return 'postgres';
+    if (/\bmysql\b/.test(l))            return 'mysql';
+    if (/mariadb/.test(l))              return 'mariadb';
+    if (/mongo(db)?/.test(l))           return 'mongodb';
+    if (/\bredis\b/.test(l))            return 'redis';
+    if (/elastic(search)?/.test(l))     return 'elasticsearch';
+    if (/cassandra/.test(l))            return 'cassandra';
+    if (/minio|mino\b/.test(l))         return 'minio';
+    return null;
+}
+
+const pendingInputs = new Map<string, (values: Record<string, string> | null) => void>();
+
+function awaitInput(
+    userId: string,
+    agentId: string,
+    spec: DbSpec
+): Promise<Record<string, string> | null> {
+    return new Promise(resolve => {
+        pendingInputs.set(agentId, resolve);
+        emitToUser(userId, 'agent:input_required', { agentId, ...spec });
+        // Auto-cancel after 15 minutes
+        setTimeout(() => {
+            if (pendingInputs.has(agentId)) {
+                pendingInputs.delete(agentId);
+                resolve(null);
+            }
+        }, 15 * 60 * 1000);
+    });
+}
+
 // ── Destructive-action confirmation gate ──────────────────────────────────────
 
 const pendingConfirms = new Map<string, (confirmed: boolean) => void>();
@@ -1486,6 +1626,33 @@ async function runAgentLoop(
     // Persist task record immediately
     await createTask(agentId, message);
 
+    // ── DB setup input gate ────────────────────────────────────────────────
+    const dbType = detectDbSetup(message);
+    if (dbType) {
+        const spec = DB_INPUT_SPECS[dbType];
+        emitToUser(userId, 'agent:log', { agentId, type: 'info',
+            content: `Please fill in the ${spec.title} form before I proceed…` });
+        const values = await awaitInput(userId, agentId, spec);
+        if (!values) {
+            emitToUser(userId, 'agent:log', { agentId, type: 'info', content: 'Setup cancelled — no configuration provided.' });
+            emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Setup cancelled by user' });
+            return;
+        }
+        // Augment the original message with verbatim user config
+        const configLines = spec.fields
+            .filter(f => values[f.id] !== undefined && values[f.id] !== '')
+            .map(f => {
+                if (f.id === 'access') {
+                    return values[f.id] === 'public'
+                        ? `- Network Access: public (MUST expose port to host using -p flag)`
+                        : `- Network Access: private (do NOT use -p flag, internal Docker network only)`;
+                }
+                return `- ${f.label}: ${values[f.id]}`;
+            });
+        message = `${message}\n\nUse EXACTLY these configuration values — do not choose your own defaults:\n${configLines.join('\n')}`;
+    }
+    // ── end DB setup input gate ───────────────────────────────────────────
+
     // Helper: intercept emitToUser so we can also accumulate for persistence
     const emit = (type: string, content: string) => {
         allLogLines.push(`[${type}] ${content}`);
@@ -1704,6 +1871,16 @@ router.post('/run', authenticateToken, async (req, res) => {
             : (err?.message || 'Agent failed');
         return res.status(status === 401 || status === 403 ? 400 : status).json({ message: msg });
     }
+});
+
+router.post('/input', authenticateToken, async (req, res) => {
+    const { agentId, values } = req.body as { agentId: string; values: Record<string, string> };
+    const resolve = pendingInputs.get(agentId);
+    if (resolve) {
+        pendingInputs.delete(agentId);
+        resolve(values ?? null);
+    }
+    res.json({ ok: true });
 });
 
 router.post('/confirm', authenticateToken, async (req, res) => {
