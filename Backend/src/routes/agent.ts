@@ -707,16 +707,17 @@ const DB_INPUT_SPECS: Record<string, DbSpec> = {
 /** Detect if the user message is asking to install/setup a specific database */
 function detectDbSetup(message: string): string | null {
     const l = message.toLowerCase();
-    const isSetupIntent = /install|setup|create|deploy|run|start|spin.?up|add|configure/.test(l);
+    // "set up" (two words), "setup", "install", "deploy", "run", "start", "spin up", "create", "init", "new", "add", "configure"
+    const isSetupIntent = /install|set[\s_-]?up|setup|create|deploy|run|start|spin[\s-]?up|add|configure|init|new|fresh/.test(l);
     if (!isSetupIntent) return null;
-    if (/postgres(ql)?/.test(l))        return 'postgres';
-    if (/\bmysql\b/.test(l))            return 'mysql';
-    if (/mariadb/.test(l))              return 'mariadb';
-    if (/mongo(db)?/.test(l))           return 'mongodb';
-    if (/\bredis\b/.test(l))            return 'redis';
-    if (/elastic(search)?/.test(l))     return 'elasticsearch';
-    if (/cassandra/.test(l))            return 'cassandra';
-    if (/minio|mino\b/.test(l))         return 'minio';
+    if (/postgres(ql)?|pgsql|pg\b/.test(l))  return 'postgres';
+    if (/\bmysql\b/.test(l))                 return 'mysql';
+    if (/mariadb/.test(l))                   return 'mariadb';
+    if (/mongo(db)?/.test(l))                return 'mongodb';
+    if (/\bredis\b/.test(l))                 return 'redis';
+    if (/elastic(search)?/.test(l))          return 'elasticsearch';
+    if (/cassandra/.test(l))                 return 'cassandra';
+    if (/minio|mino\b/.test(l))              return 'minio';
     return null;
 }
 
@@ -866,9 +867,9 @@ async function executeSteps(
                 );
                 if (!confirmed) {
                     emitToUser(userId, 'agent:log', { agentId, type: 'info',
-                        content: `Skipped removal of "${step.container}" — cancelled by user.` });
-                    if (!step.continueOnError) return { failed: false, log: logLines.join('\n') };
-                    continue;
+                        content: `Cancelled — "${step.container}" was not removed. Stopping plan to keep your data safe.` });
+                    // Always halt: remaining steps assume the container was removed
+                    return { failed: false, log: logLines.join('\n') };
                 }
             }
             cmd(`docker rm -f ${step.container}`);
@@ -882,6 +883,31 @@ async function executeSteps(
         }
 
         if (step.type === 'docker_free_port') {
+            // Gate: check if a data container is currently bound to this port
+            let dataOnPort: string[] = [];
+            try {
+                const names = execSync(
+                    `docker ps --filter publish=${step.port} --format "{{.Names}}"`,
+                    { stdio: 'pipe', timeout: 5_000 }
+                ).toString().trim();
+                dataOnPort = names.split('\n').map(n => n.trim()).filter(n => n && isDataContainer(n));
+            } catch { /* docker not available — skip check */ }
+
+            if (dataOnPort.length > 0) {
+                emitToUser(userId, 'agent:log', { agentId, type: 'info',
+                    content: `Port ${step.port} is occupied by "${dataOnPort.join(', ')}" which may hold data — waiting for your confirmation.` });
+                const confirmed = await awaitConfirm(
+                    userId, agentId,
+                    `Free port ${step.port}?`,
+                    `Port ${step.port} is currently used by "${dataOnPort.join(', ')}" which may contain database data.\n\nFreeing it will stop and remove that container.\n\nDo you want to continue?`
+                );
+                if (!confirmed) {
+                    emitToUser(userId, 'agent:log', { agentId, type: 'info',
+                        content: `Cancelled — port ${step.port} was not freed. Stopping plan to keep your data safe.` });
+                    return { failed: false, log: logLines.join('\n') };
+                }
+            }
+
             cmd(`Freeing port ${step.port}`);
             stopContainersOnPort(step.port);
             ok(`Port ${step.port} is now free`);
