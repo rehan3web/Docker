@@ -75,7 +75,7 @@ Nextbase is a self-hosted, full-stack PostgreSQL management tool — a lightweig
 - `Frontend/vite.config.ts`: Vite config with API proxy and host settings
 - `Backend/src/index.ts`: Express server entry point
 - `Backend/src/lib/db.ts`: PostgreSQL connection pool
-- `Backend/src/lib/config.ts`: Config loader (postgres.yml + .env)
+- `Backend/src/lib/config.ts`: Config loader (docker-compose.yml + .env)
 - `Backend/src/routes/`: auth, db, query, admin, system, terminal, docker, deploy, proxy route handlers
 - `Backend/src/lib/socket.ts`: Shared Socket.IO instance + scoped emission helpers (`emitToUser`, `emitToAuthed`, `emitTo`)
 - `Backend/src/lib/safety.ts`: Dangerous-command regex patterns + curated command suggestions
@@ -83,6 +83,6 @@ Nextbase is a self-hosted, full-stack PostgreSQL management tool — a lightweig
 - `Backend/src/lib/crypto.ts`: AES-256-GCM helpers used to encrypt secrets at rest
 - `Frontend/src/api/socket.ts`: Singleton Socket.IO client that auto-attaches the JWT in the handshake
 - `Frontend/src/pages/{vps,terminal,docker,deploy,proxy}.tsx`: Feature pages
-- `postgres.yml`: Docker Compose config — includes `docklet-traefik` (ports 80/443), `nextbase-haproxy` (8000-8098), `dbofather-server` (backend)
+- `docker-compose.yml`: Docker Compose config — Frontend (Caddy) + Backend + Traefik (ports 80/443) + PostgreSQL + pgBouncer + Redis
 - `traefik-configs/`: Traefik dynamic file-provider YAML configs auto-written by the backend; hot-reloaded by Traefik automatically
 - `letsencrypt/`: bind-mounted into Traefik container; Traefik's ACME writes certs here

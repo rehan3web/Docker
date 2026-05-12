@@ -107,8 +107,8 @@ function ConnectionSection() {
             const result = await exposeDatabase();
             setLiveExposed(result);
             const modeLabel = result.mode === 'docker' ? 'Docker containers restarted' :
-                result.mode === 'docker-config-updated' ? 'postgres.yml updated — restart containers to apply' :
-                    'postgres.yml updated — run docker compose up -d --force-recreate postgres pgbouncer';
+                result.mode === 'docker-config-updated' ? 'docker-compose.yml updated — restart containers to apply' :
+                    'docker-compose.yml updated — run docker compose up -d --force-recreate postgres pgbouncer';
             toast.custom((t) => (<Alert variant="success" title="Public Access Enabled" description={`${modeLabel}. Connect via ${result.serverIp}:${result.directPublicPort}`} onClose={() => toast.dismiss(t)} />));
             qc.invalidateQueries({ queryKey: ["admin-connection-config"] });
         } catch (err: any) {
@@ -121,7 +121,7 @@ function ConnectionSection() {
         try {
             const result = await unexposeDatabase();
             setLiveExposed({ exposed: false });
-            toast.custom((t) => (<Alert variant="warning" title="Public Access Removed" description={(result as any).note || "postgres.yml restored to local-only binding."} onClose={() => toast.dismiss(t)} />));
+            toast.custom((t) => (<Alert variant="warning" title="Public Access Removed" description={(result as any).note || "docker-compose.yml restored to local-only binding."} onClose={() => toast.dismiss(t)} />));
             qc.invalidateQueries({ queryKey: ["admin-connection-config"] });
         } catch (err: any) {
             toast.custom((t) => (<Alert variant="error" title="Error" description={err.message} onClose={() => toast.dismiss(t)} />));

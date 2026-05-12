@@ -330,7 +330,7 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
                         <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={loadTraefikSnippet}>Refresh</Button>
                       </div>
                       <pre className="bg-muted rounded-lg p-2.5 text-[10px] font-mono text-foreground overflow-x-auto whitespace-pre leading-relaxed">{traefikSnippet}</pre>
-                      <p className="text-[10px] text-muted-foreground">Add this to your <code className="font-mono">postgres.yml</code> and run: <code className="font-mono">docker network create proxy</code></p>
+                      <p className="text-[10px] text-muted-foreground">Add this to your <code className="font-mono">docker-compose.yml</code> and run: <code className="font-mono">docker network create proxy</code></p>
                     </div>
                   )}
                 </div>

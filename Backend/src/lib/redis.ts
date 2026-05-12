@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 
-// ── Always connects to the docklet-redis service defined in postgres.yml ──────
+// ── Always connects to the docklet-redis service defined in docker-compose.yml ──────
 // No env var needed — the service name resolves automatically on the Docker
 // network. In non-Docker environments (local dev, Replit) the connection will
 // fail gracefully and caching is silently disabled.

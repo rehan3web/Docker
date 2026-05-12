@@ -382,7 +382,7 @@ export async function resetDatabase(): Promise<{ message: string; dropped: numbe
   return apiFetch("/admin/db/reset", { method: "POST" });
 }
 
-// ── Connection config from postgres.yml ───────────────────────────────────────
+// ── Connection config from docker-compose.yml ─────────────────────────────────
 
 export type ConnectionConfig = {
   user: string;

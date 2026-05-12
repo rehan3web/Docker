@@ -1,0 +1,25 @@
+:80 {
+    encode gzip
+
+    # Proxy API requests to the backend via Docker internal DNS — no Nginx needed
+    reverse_proxy /api/* docklet-server:3001 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Proxy Socket.IO (WebSocket upgrade) to the backend via Docker internal DNS
+    reverse_proxy /socket.io/* docklet-server:3001 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up Upgrade {http.request.header.Upgrade}
+        header_up Connection {http.request.header.Connection}
+    }
+
+    # Serve React SPA — fallback to index.html for client-side routing
+    root * /srv
+    try_files {path} /index.html
+    file_server
+}

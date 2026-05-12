@@ -48,7 +48,7 @@ const STEPS: Step[] = [
         title: "Restart the containers",
         description: "Apply the new credentials by restarting Docklet. Docker Compose will read the updated .env automatically.",
         commands: [
-            { label: "Restart all services", code: "docker compose -f postgres.yml up -d" },
+            { label: "Restart all services", code: "docker compose up -d" },
         ],
     },
     {

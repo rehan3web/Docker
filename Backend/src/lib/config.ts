@@ -4,17 +4,23 @@ import yaml from 'js-yaml';
 
 function resolveConfigPath(): string {
     const candidates = [
-        '/config/postgres.yml',                              // Docker container mount
-        path.resolve(process.cwd(), 'postgres.yml'),        // CWD (local dev)
-        path.resolve(process.cwd(), '../postgres.yml'),     // One level up
-        path.resolve(__dirname, '../../../postgres.yml'),   // Relative to dist/
+        '/config/docker-compose.yml',                           // Docker container mount
+        '/config/postgres.yml',                                 // Docker container mount (legacy)
+        path.resolve(process.cwd(), 'docker-compose.yml'),     // CWD
+        path.resolve(process.cwd(), 'postgres.yml'),           // CWD (legacy)
+        path.resolve(process.cwd(), '../docker-compose.yml'),
+        path.resolve(process.cwd(), '../postgres.yml'),
+        path.resolve(__dirname, '../../../docker-compose.yml'),
+        path.resolve(__dirname, '../../../postgres.yml'),
+        path.resolve(__dirname, '../../docker-compose.yml'),
         path.resolve(__dirname, '../../postgres.yml'),
+        path.resolve(__dirname, '../docker-compose.yml'),
         path.resolve(__dirname, '../postgres.yml'),
     ];
     for (const p of candidates) {
         if (fs.existsSync(p)) return p;
     }
-    return candidates[1];
+    return candidates[2];
 }
 
 /**
@@ -105,7 +111,7 @@ export function loadConfig(): any {
         const envMap = loadDotEnv();
         return resolveEnvVars(raw, envMap);
     } catch (e) {
-        console.error('Error loading postgres.yml:', e);
+        console.error('Error loading docker-compose.yml:', e);
         return null;
     }
 }
@@ -117,7 +123,7 @@ export function saveConfig(services: any) {
         fs.writeFileSync(CONFIG_PATH, yamlStr, 'utf8');
         return true;
     } catch (e) {
-        console.error('Error saving postgres.yml:', e);
+        console.error('Error saving docker-compose.yml:', e);
         return false;
     }
 }

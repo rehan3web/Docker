@@ -104,7 +104,7 @@ JWT_SECRET=replace_with_a_64_char_random_string
 ### 3. Start everything
 
 ```bash
-docker compose -f postgres.yml up -d --build
+docker compose up -d --build
 ```
 
 ### 4. Open the web UI
@@ -256,8 +256,8 @@ Pull the latest changes and rebuild:
 
 ```bash
 git pull
-docker compose -f postgres.yml build
-docker compose -f postgres.yml up -d
+docker compose build
+docker compose up -d
 ```
 
 Your PostgreSQL data is in the `pgdata` Docker volume and is never affected by updates.
@@ -270,7 +270,7 @@ If you forget your admin credentials, edit `.env` and restart:
 
 ```bash
 nano .env   # change ADMIN_USERNAME / ADMIN_PASSWORD
-docker compose -f postgres.yml up -d --force-recreate dbcraft-server
+docker compose up -d --force-recreate docklet-server
 ```
 
 Or follow the built-in guide at `/forgot-password` in the UI.
@@ -282,13 +282,13 @@ Or follow the built-in guide at `/forgot-password` in the UI.
 **Stop all services (keep data):**
 
 ```bash
-docker compose -f postgres.yml down
+docker compose down
 ```
 
 **Stop and remove all data (irreversible):**
 
 ```bash
-docker compose -f postgres.yml down -v
+docker compose down -v
 ```
 
 ---

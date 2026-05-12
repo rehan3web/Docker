@@ -1,0 +1,216 @@
+name: docklet
+
+# ══════════════════════════════════════════════════════════════════
+#  All credentials are read from .env in the same directory.
+#  Copy .env.example → .env and fill in your values, then run:
+#  docker compose up -d --build
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  postgres:
+    container_name: docklet-db
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB:       ${DB_NAME}
+    ports:
+      - "127.0.0.1:15432:5432"   # local-only; Traefik TCP proxy serves public :5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    container_name: docklet-pooler
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:16543:5432"   # local-only; Traefik TCP proxy serves public :6543
+    environment:
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_USER:     ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME:     ${DB_NAME}
+      POOL_MODE:   transaction
+      MAX_CLIENT_CONN:   1000
+      DEFAULT_POOL_SIZE: 10
+      AUTH_TYPE:   scram-sha-256
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
+
+  # ── Traefik TCP proxy — started by "Expose Public" button ──────────────────
+  docklet-proxy:
+    container_name: docklet-proxy
+    build:
+      context: ./Proxy
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:5432:5432"
+      - "0.0.0.0:6543:6543"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    profiles:
+      - expose
+
+  redis:
+    container_name: docklet-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --loglevel warning --save 60 1 --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend API server ──────────────────────────────────────────────────────
+  # Accessible internally via Docker DNS: http://docklet-server:3001
+  # Traefik routes /api/* and /socket.io/* here from ports 80/443.
+  docklet-server:
+    container_name: docklet-server
+    build:
+      context: ./Backend
+    restart: unless-stopped
+    pid: host
+    privileged: true
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    environment:
+      PGHOST:     pgbouncer
+      PGPORT:     5432
+      PGUSER:     ${DB_USERNAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_NAME}
+      POSTGRES_DIRECT_HOST: postgres
+      POSTGRES_DIRECT_PORT: 5432
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      JWT_SECRET:     ${JWT_SECRET}
+      PORT: 3001
+      SELF_CONTAINER_NAME: docklet-server
+      ENABLE_2FA: ${ENABLE_2FA:-false}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-compose.yml:/config/docker-compose.yml
+      - ./.env:/config/.env
+      - ./Proxy:/config/Proxy
+      - ./backups:/usr/src/app/backups
+      - ./traefik-configs:/usr/src/app/traefik-configs
+      - ./letsencrypt:/usr/src/app/letsencrypt
+    labels:
+      - "traefik.enable=true"
+      # Route /api/* and /socket.io/* to the backend (higher priority)
+      - "traefik.http.routers.docklet-api.rule=PathPrefix(`/api`) || PathPrefix(`/socket.io`)"
+      - "traefik.http.routers.docklet-api.entrypoints=web"
+      - "traefik.http.routers.docklet-api.priority=10"
+      - "traefik.http.services.docklet-api.loadbalancer.server.port=3001"
+      # HTTPS variant
+      - "traefik.http.routers.docklet-api-secure.rule=PathPrefix(`/api`) || PathPrefix(`/socket.io`)"
+      - "traefik.http.routers.docklet-api-secure.entrypoints=websecure"
+      - "traefik.http.routers.docklet-api-secure.tls=true"
+      - "traefik.http.routers.docklet-api-secure.priority=10"
+      - "traefik.http.services.docklet-api-secure.loadbalancer.server.port=3001"
+
+  # ── Frontend static files — served by Caddy (no Nginx) ─────────────────────
+  # Caddy proxies /api/* and /socket.io/* to docklet-server via Docker internal DNS.
+  # Direct access: http://host:3000  |  Via Traefik: http://host (port 80/443)
+  docklet-client:
+    container_name: docklet-client
+    build:
+      context: ./Frontend
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:3000:80"
+    depends_on:
+      - docklet-server
+    labels:
+      - "traefik.enable=true"
+      # Catch-all: everything else goes to the frontend (lower priority)
+      - "traefik.http.routers.docklet-client.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.docklet-client.entrypoints=web"
+      - "traefik.http.routers.docklet-client.priority=1"
+      - "traefik.http.services.docklet-client.loadbalancer.server.port=80"
+      # HTTPS variant
+      - "traefik.http.routers.docklet-client-secure.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.docklet-client-secure.entrypoints=websecure"
+      - "traefik.http.routers.docklet-client-secure.tls=true"
+      - "traefik.http.routers.docklet-client-secure.priority=1"
+      - "traefik.http.services.docklet-client-secure.loadbalancer.server.port=80"
+
+  # ── One-shot init: create acme.json with correct permissions ──────────────
+  traefik-init:
+    container_name: docklet-traefik-init
+    image: alpine:3.19
+    restart: "no"
+    volumes:
+      - ./letsencrypt:/letsencrypt
+      - ./traefik-configs:/traefik-configs
+    command: >
+      sh -c "
+        mkdir -p /letsencrypt /traefik-configs &&
+        touch /letsencrypt/acme.json &&
+        chmod 600 /letsencrypt/acme.json &&
+        echo '[traefik-init] acme.json ready (chmod 600)'
+      "
+
+  # ── Traefik HTTP/HTTPS reverse proxy ───────────────────────────────────────
+  # Routes /api/* and /socket.io/* → docklet-server:3001 (Docker internal DNS)
+  # Routes /*                       → docklet-client:80  (Docker internal DNS)
+  # Let's Encrypt SSL via built-in ACME — no certbot required.
+  docklet-traefik:
+    container_name: docklet-traefik
+    image: traefik:v3.3
+    restart: unless-stopped
+    command:
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      - "--providers.file.directory=/traefik-configs"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+      - ./traefik-configs:/traefik-configs:ro
+    networks:
+      - default
+      - apps
+    depends_on:
+      traefik-init:
+        condition: service_completed_successfully
+      docklet-server:
+        condition: service_started
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  apps:
+    name: docklet-apps

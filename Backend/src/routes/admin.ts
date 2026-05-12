@@ -23,10 +23,15 @@ function formatBytes(bytes: number): string {
 
 function findConfigPath(): string | null {
     const candidates = [
-        '/config/postgres.yml',                             // Docker container mount
+        '/config/docker-compose.yml',                           // Docker container mount
+        '/config/postgres.yml',                                 // Legacy mount
+        path.resolve(process.cwd(), 'docker-compose.yml'),
         path.resolve(process.cwd(), 'postgres.yml'),
+        path.resolve(process.cwd(), '../docker-compose.yml'),
         path.resolve(process.cwd(), '../postgres.yml'),
+        path.resolve(__dirname, '../../../docker-compose.yml'),
         path.resolve(__dirname, '../../../postgres.yml'),
+        path.resolve(__dirname, '../../docker-compose.yml'),
         path.resolve(__dirname, '../../postgres.yml'),
     ];
     for (const p of candidates) {
@@ -79,7 +84,7 @@ function composeCmd(): string[] {
 
 function dockerComposeProxy(action: 'up' | 'stop' | 'rm'): Promise<string> {
     const cfgPath = findConfigPath();
-    if (!cfgPath) return Promise.reject(new Error('postgres.yml not found'));
+    if (!cfgPath) return Promise.reject(new Error('docker-compose.yml not found'));
     const base = composeCmd();
     const fileArgs = ['-f', cfgPath];
     const actionArgs = action === 'up'
@@ -147,7 +152,7 @@ router.post('/backup', authenticateToken, async (_req, res) => {
 
     const useDocker = isDockerAvailable();
 
-    // For docker: use postgres.yml credentials; for direct: use env vars
+    // For docker: use docker-compose.yml credentials; for direct: use env vars
     const { user: cfgUser, password: cfgPassword, db: cfgDb, containerName } = getDbConfig();
     const host = process.env.PGHOST || '127.0.0.1';
     const port = process.env.PGPORT || '5432';
@@ -312,7 +317,7 @@ router.post('/restore', authenticateToken, async (req, res) => {
     proc.stdin!.end();
 });
 
-// ── Connection config from postgres.yml ───────────────────────────────────────
+// ── Connection config from docker-compose.yml ─────────────────────────────────
 router.get('/connection', authenticateToken, async (_req, res) => {
     const { user, password, db, containerName, poolerContainer, directPort, poolerPort, publicDirectPort, publicPoolerPort } = getDbConfig();
     const publicIp = await getPublicIP();
