@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
@@ -48,20 +47,18 @@ function fileIcon(key: string) {
 
 // ── Connect Dialog ────────────────────────────────────────────────────────────
 function ConnectDialog({ open, onClose, onConnected }: { open: boolean; onClose: () => void; onConnected: () => void }) {
-  const [endpoint, setEndpoint] = useState("");
-  const [port, setPort] = useState("9000");
+  const [endpointUrl, setEndpointUrl] = useState("");
   const [accessKey, setAccessKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [region, setRegion] = useState("us-east-1");
-  const [useSsl, setUseSsl] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
-      await storageConnect({ endpoint, port: parseInt(port) || 9000, access_key: accessKey, secret_key: secretKey, region, use_ssl: useSsl });
-      toast.success("Connected to MinIO successfully");
+      await storageConnect({ endpoint_url: endpointUrl, access_key: accessKey, secret_key: secretKey, region });
+      toast.success("Connected successfully");
       onConnected();
       onClose();
     } catch (err: any) {
@@ -76,42 +73,39 @@ function ConnectDialog({ open, onClose, onConnected }: { open: boolean; onClose:
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <Link2 className="w-4 h-4 text-muted-foreground" /> Connect to MinIO
+            <Link2 className="w-4 h-4 text-muted-foreground" /> Connect S3-Compatible Storage
           </DialogTitle>
-          <DialogDescription className="text-xs">Configure your MinIO / S3-compatible endpoint.</DialogDescription>
+          <DialogDescription className="text-xs">
+            Supports MinIO, Tigris, Cloudflare R2, Backblaze B2, and any S3-compatible service.
+          </DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="space-y-4 pt-1">
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2 space-y-1.5">
-              <Label className="text-xs">Endpoint</Label>
-              <Input placeholder="minio.example.com or IP" value={endpoint} onChange={e => setEndpoint(e.target.value)} className="h-8 text-xs" required />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Port</Label>
-              <Input placeholder="9000" value={port} onChange={e => setPort(e.target.value)} className="h-8 text-xs" />
-            </div>
+        <form onSubmit={submit} className="space-y-3 pt-1">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Endpoint URL</Label>
+            <Input
+              placeholder="https://t3.storageapi.dev  or  http://minio.host:9000"
+              value={endpointUrl}
+              onChange={e => setEndpointUrl(e.target.value)}
+              className="h-8 text-xs font-mono shadow-none"
+              required
+            />
+            <p className="text-[10px] text-muted-foreground">Full URL including scheme — SSL is inferred from <code>https://</code></p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Region</Label>
+            <Input placeholder="us-east-1  or  auto" value={region} onChange={e => setRegion(e.target.value)} className="h-8 text-xs shadow-none" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">Access Key</Label>
-              <Input placeholder="minioadmin" value={accessKey} onChange={e => setAccessKey(e.target.value)} className="h-8 text-xs" required />
+              <Label className="text-xs">Access Key ID</Label>
+              <Input placeholder="Access key" value={accessKey} onChange={e => setAccessKey(e.target.value)} className="h-8 text-xs font-mono shadow-none" required />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Secret Key</Label>
-              <Input type="password" placeholder="minioadmin" value={secretKey} onChange={e => setSecretKey(e.target.value)} className="h-8 text-xs" required />
+              <Label className="text-xs">Secret Access Key</Label>
+              <Input type="password" placeholder="Secret key" value={secretKey} onChange={e => setSecretKey(e.target.value)} className="h-8 text-xs font-mono shadow-none" required />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 items-end">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Region</Label>
-              <Input placeholder="us-east-1" value={region} onChange={e => setRegion(e.target.value)} className="h-8 text-xs" />
-            </div>
-            <div className="flex items-center gap-2 pb-0.5">
-              <Switch checked={useSsl} onCheckedChange={setUseSsl} id="ssl" />
-              <Label htmlFor="ssl" className="text-xs cursor-pointer">Use SSL</Label>
-            </div>
-          </div>
-          <DialogFooter>
+          <DialogFooter className="pt-1">
             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Cancel</Button>
             <Button type="submit" size="sm" disabled={busy} className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
               {busy ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Connecting…</> : "Connect"}
@@ -1044,7 +1038,7 @@ export default function StoragePage() {
                 <span className="font-medium text-sm tracking-tight">Storage</span>
                 {connected && conn && (
                   <Badge variant="outline" className="font-mono text-[10px] rounded-full px-2 py-0 text-primary bg-primary/10 border-primary/20">
-                    {conn.endpoint}:{conn.port}
+                    {/^https?:\/\//i.test(conn.endpoint ?? "") ? conn.endpoint : `${conn.endpoint}:${conn.port}`}
                   </Badge>
                 )}
                 {isManaged && (

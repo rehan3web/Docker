@@ -63,12 +63,22 @@ async function getConfig() {
 }
 
 function buildClient(cfg: any): S3Client {
-    const scheme = cfg.use_ssl ? 'https' : 'http';
+    let endpointUrl: string;
+    let host: string;
+    if (/^https?:\/\//i.test(cfg.endpoint)) {
+        endpointUrl = cfg.endpoint;
+        try { host = new URL(cfg.endpoint).hostname; } catch { host = cfg.endpoint; }
+    } else {
+        const scheme = cfg.use_ssl ? 'https' : 'http';
+        endpointUrl = `${scheme}://${cfg.endpoint}:${cfg.port}`;
+        host = cfg.endpoint;
+    }
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
     return new S3Client({
-        endpoint: `${scheme}://${cfg.endpoint}:${cfg.port}`,
+        endpoint: endpointUrl,
         region: cfg.region || 'us-east-1',
         credentials: { accessKeyId: cfg.access_key, secretAccessKey: cfg.secret_key },
-        forcePathStyle: true,
+        forcePathStyle: isLocal,
     });
 }
 
@@ -83,18 +93,33 @@ async function requireClient(res: express.Response): Promise<S3Client | null> {
 
 // ── Connection ────────────────────────────────────────────────────────────────
 router.post('/connect', async (req, res) => {
-    const { endpoint, port, access_key, secret_key, region, use_ssl } = req.body;
-    if (!endpoint || !access_key || !secret_key) {
-        return res.status(400).json({ message: 'endpoint, access_key and secret_key are required' });
+    const { endpoint_url, endpoint, port, access_key, secret_key, region, use_ssl } = req.body;
+    if ((!endpoint_url && !endpoint) || !access_key || !secret_key) {
+        return res.status(400).json({ message: 'endpoint (or endpoint_url), access_key and secret_key are required' });
     }
-    const cfg = {
-        endpoint: String(endpoint).trim(),
-        port: parseInt(String(port)) || 9000,
-        access_key: String(access_key),
-        secret_key: String(secret_key),
-        region: String(region || 'us-east-1'),
-        use_ssl: !!use_ssl,
-    };
+    let cfg: any;
+    if (endpoint_url) {
+        const raw = String(endpoint_url).trim();
+        let parsed: URL;
+        try { parsed = new URL(raw); } catch { return res.status(400).json({ message: 'Invalid endpoint URL — must start with http:// or https://' }); }
+        cfg = {
+            endpoint: raw,
+            port: parsed.port ? parseInt(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80),
+            access_key: String(access_key),
+            secret_key: String(secret_key),
+            region: String(region || 'us-east-1'),
+            use_ssl: parsed.protocol === 'https:',
+        };
+    } else {
+        cfg = {
+            endpoint: String(endpoint).trim(),
+            port: parseInt(String(port)) || 9000,
+            access_key: String(access_key),
+            secret_key: String(secret_key),
+            region: String(region || 'us-east-1'),
+            use_ssl: !!use_ssl,
+        };
+    }
     try {
         await buildClient(cfg).send(new ListBucketsCommand({}));
     } catch (err: any) {

@@ -811,7 +811,8 @@ export function useGetStorageFiles(bucket: string | null, prefix = "") {
 }
 
 export async function storageConnect(payload: {
-  endpoint: string; port: number; access_key: string; secret_key: string; region: string; use_ssl: boolean;
+  endpoint_url?: string; endpoint?: string; port?: number;
+  access_key: string; secret_key: string; region?: string; use_ssl?: boolean;
 }): Promise<{ ok: boolean }> {
   return apiFetch("/storage/connect", { method: "POST", body: JSON.stringify(payload) });
 }
