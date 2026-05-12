@@ -129,7 +129,7 @@ function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
             className={cn(
                 "flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left group cursor-pointer",
                 active
-                    ? "bg-muted text-foreground border border-border shadow-sm"
+                    ? "bg-muted text-foreground border border-border"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground border border-transparent"
             )}
         >
@@ -199,7 +199,7 @@ function SidebarBottom({ onSelect }: { onSelect?: () => void }) {
                     className={cn(
                         "flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left group cursor-pointer",
                         settingsActive
-                            ? "bg-muted text-foreground border border-border shadow-sm"
+                            ? "bg-muted text-foreground border border-border"
                             : "text-muted-foreground hover:bg-muted/50 hover:text-foreground border border-transparent"
                     )}
                 >
