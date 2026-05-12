@@ -1,0 +1,302 @@
+import { useState, useRef, useEffect } from "react";
+import { Lightbulb, Code2, BookOpen, Zap, Bot } from "lucide-react";
+import { useTheme } from "@/hooks/use-theme";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sidebar } from "@/components/chat/Sidebar";
+import { ChatHeader } from "@/components/chat/ChatHeader";
+import { ChatComposer } from "@/components/chat/ChatComposer";
+import { MessageItem } from "@/components/chat/MessageItem";
+import { SuggestionCards } from "@/components/chat/SuggestionCards";
+import { Message, Conversation, SuggestionCard } from "@/types/chat";
+import { getModels, getHistory, getChatById, deleteChat as deleteChatApi, getMe, streamChat, updateProfile as updateProfileApi, logout as logoutApi } from "@/lib/api";
+import { toast } from "sonner";
+
+const suggestionCards: SuggestionCard[] = [
+  { icon: Lightbulb, title: "Brainstorm ideas", desc: "for a product launch campaign" },
+  { icon: Code2, title: "Write code", desc: "to parse a CSV in TypeScript" },
+  { icon: BookOpen, title: "Summarize", desc: "a long article into bullet points" },
+  { icon: Zap, title: "Plan a trip", desc: "5 days in Tokyo on a budget" },
+];
+
+export const ChatScreen = () => {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [isThinking, setIsThinking] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { isDark, toggleTheme } = useTheme();
+  const isMobile = useIsMobile();
+  
+  const [models, setModels] = useState<any[]>([]);
+  const [selectedModel, setSelectedModel] = useState<any>(null);
+  const [user, setUser] = useState<any>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [searchEnabled, setSearchEnabled] = useState(false);
+
+  useEffect(() => {
+    if (isMobile) {
+      setSidebarOpen(false);
+    } else {
+      setSidebarOpen(true);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const [modelsData, historyData, userData] = await Promise.all([
+          getModels(),
+          getHistory(),
+          getMe()
+        ]);
+        setModels(modelsData);
+        if (modelsData.length > 0) setSelectedModel(modelsData[0]);
+        setUser(userData);
+        
+        const formattedHistory = historyData.map((chat: any) => ({
+          id: chat._id,
+          title: chat.title,
+          updatedAt: new Date(chat.updatedAt).toLocaleDateString()
+        }));
+        setConversations(formattedHistory);
+      } catch (err) {
+        toast.error("Failed to load user data");
+      }
+    };
+    fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, isThinking]);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + "px";
+    }
+  }, [input]);
+
+  const send = async (text?: string) => {
+    const content = (text ?? input).trim();
+    if (!content) return;
+    
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content, image: selectedImage || undefined };
+    const aiMsgId = crypto.randomUUID();
+    const initialAiMsg: Message = { id: aiMsgId, role: "assistant", content: "" };
+
+    setMessages((m) => [...m, userMsg, initialAiMsg]);
+    setInput("");
+    setSelectedImage(null);
+    setIsThinking(true);
+
+    let currentActiveId = activeId;
+
+    try {
+      const endpoint = currentActiveId ? "/chat/message" : "/chat/new";
+      const payload = currentActiveId 
+        ? { chatId: currentActiveId, message: content, image: userMsg.image, model: selectedModel?.id, searchEnabled }
+        : { message: content, model: selectedModel?.id, image: userMsg.image, searchEnabled };
+
+      await streamChat(
+        endpoint,
+        payload,
+        (metadata) => {
+            if (!currentActiveId && metadata.chat) {
+                currentActiveId = metadata.chat._id;
+                setActiveId(currentActiveId);
+                setConversations(prev => [{
+                    id: metadata.chat._id,
+                    title: metadata.chat.title,
+                    updatedAt: "Today"
+                }, ...prev]);
+            }
+        },
+        (textChunk) => {
+            setMessages((prev) => 
+                prev.map(msg => 
+                    msg.id === aiMsgId 
+                        ? { ...msg, content: msg.content + textChunk }
+                        : msg
+                )
+            );
+            setIsThinking(false); // Hide the loading spinner once streaming starts
+        },
+        (completedMsg) => {
+            // Optional: replace the local temporary ID with the official DB ID
+            setMessages((prev) => 
+                prev.map(msg => 
+                    msg.id === aiMsgId 
+                        ? { ...msg, id: completedMsg._id }
+                        : msg
+                )
+            );
+        }
+      );
+    } catch (err) {
+      toast.error("Failed to get response");
+      setMessages((prev) => prev.filter(msg => msg.id !== aiMsgId));
+    } finally {
+      setIsThinking(false);
+    }
+  };
+
+  const newChat = () => {
+    setMessages([]);
+    setActiveId(null);
+  };
+
+  const togglePin = (id: string) =>
+    setConversations((cs) => cs.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c)));
+
+  const startRename = (c: Conversation) => {
+    setRenamingId(c.id);
+    setRenameValue(c.title);
+  };
+
+  const commitRename = () => {
+    if (!renamingId) return;
+    const next = renameValue.trim();
+    if (next) {
+      setConversations((cs) =>
+        cs.map((c) => (c.id === renamingId ? { ...c, title: next } : c)),
+      );
+    }
+    setRenamingId(null);
+  };
+
+  const deleteConversation = async (id: string) => {
+    try {
+      await deleteChatApi(id);
+      setConversations((cs) => cs.filter((c) => c.id !== id));
+      if (activeId === id) {
+        setActiveId(null);
+        setMessages([]);
+      }
+      toast.success("Chat deleted");
+    } catch (err) {
+      toast.error("Failed to delete chat");
+    }
+  };
+
+  const handleSelectConversation = async (c: Conversation) => {
+    setActiveId(c.id);
+    setMessages([]); 
+    try {
+      const res = await getChatById(c.id);
+      setMessages(res.messages);
+      
+      // Update selected model to match the chat's model
+      if (res.chat && res.chat.model) {
+        const model = models.find(m => m.id === res.chat.model);
+        if (model) setSelectedModel(model);
+      }
+    } catch (err) {
+      toast.error("Failed to load chat");
+    }
+  };
+
+  const handleUpdateProfile = async (data: { name: string }) => {
+    try {
+      const updatedUser = await updateProfileApi(data);
+      setUser(updatedUser);
+      toast.success("Profile updated successfully");
+    } catch (err) {
+      toast.error("Failed to update profile");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await logoutApi();
+    } catch (err) {
+      // Even if API fails, clear local storage and redirect
+      localStorage.removeItem("accessToken");
+      window.location.href = "/signin";
+    }
+  };
+
+  return (
+    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden">
+      {isMobile && sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <Sidebar
+        isOpen={sidebarOpen}
+        setIsOpen={setSidebarOpen}
+        conversations={conversations}
+        activeId={activeId}
+        setActiveId={setActiveId}
+        onNewChat={newChat}
+        onDeleteChat={deleteConversation}
+        onTogglePin={togglePin}
+        onStartRename={startRename}
+        renamingId={renamingId}
+        renameValue={renameValue}
+        setRenameValue={setRenameValue}
+        onCommitRename={commitRename}
+        setRenamingId={setRenamingId}
+        isDark={isDark}
+        toggleTheme={toggleTheme}
+        onSelectConversation={handleSelectConversation}
+        user={user}
+        onUpdateProfile={handleUpdateProfile}
+        onSignOut={handleSignOut}
+      />
+
+      <main className="flex-1 flex flex-col min-w-0">
+        <ChatHeader 
+            sidebarOpen={sidebarOpen} 
+            setSidebarOpen={setSidebarOpen} 
+            models={models}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            user={user}
+        />
+
+        <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
+          {messages.length === 0 ? (
+            <SuggestionCards suggestions={suggestionCards} onSelect={send} />
+          ) : (
+            <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
+              {messages.map((m) => (
+                <MessageItem key={m.id} message={m} />
+              ))}
+              {isThinking && (
+                <div className="flex gap-4">
+                  <div className="h-8 w-8 rounded-full bg-foreground text-background flex items-center justify-center">
+                    <Bot className="h-4 w-4" />
+                  </div>
+                  <div className="flex items-center gap-1.5 pt-3">
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]" />
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.15s]" />
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <ChatComposer
+          input={input}
+          setInput={setInput}
+          onSend={send}
+          textareaRef={textareaRef}
+          selectedImage={selectedImage}
+          onImageSelect={setSelectedImage}
+          searchEnabled={searchEnabled}
+          onSearchToggle={setSearchEnabled}
+        />
+      </main>
+    </div>
+  );
+};
