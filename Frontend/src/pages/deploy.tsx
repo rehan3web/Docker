@@ -179,8 +179,8 @@ export default function DeployPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-4 pt-2">
-              <form onSubmit={handleDeploy} className="flex flex-col sm:flex-row gap-2">
-                <Input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="https://github.com/user/repo.git" className="font-mono text-xs shadow-none" />
+              <form onSubmit={handleDeploy} className="flex flex-col sm:flex-row gap-2chnage forn ">
+                <Input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="https://github.com/user/repo.git" className="font-mono text-xs" />
                 <Button type="submit" className="h-9 sm:w-auto w-full border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" disabled={submitting || !repo.trim()}>
                   {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <GitBranch className="w-3.5 h-3.5 mr-2" />}
                   Deploy
