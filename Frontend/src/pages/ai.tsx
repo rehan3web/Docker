@@ -342,7 +342,7 @@ function ChatComposer({
   return (
     <div className="border-t border-border bg-background/80 backdrop-blur-md px-4 py-3">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-end gap-2 rounded-2xl border border-border bg-muted/30 px-4 py-3 focus-within:border-primary/40 transition-colors">
+        <div className="flex items-center gap-2 rounded-2xl border border-border bg-muted/30 px-4 py-3 focus-within:border-primary/40 transition-colors">
           <textarea
             ref={textareaRef}
             value={value}
@@ -351,12 +351,7 @@ function ChatComposer({
             placeholder={placeholder}
             disabled={disabled && !streaming}
             rows={1}
-            className={cn(
-              "flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed min-h-[24px] max-h-[200px] overflow-y-auto transition-all",
-              // Center placeholder when value is empty
-              !value && "placeholder:text-center text-center",
-              value && "text-left",
-            )}
+            className="flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed min-h-[24px] max-h-[200px] overflow-y-auto"
             style={{ height: "24px" }}
             autoComplete="off"
           />
