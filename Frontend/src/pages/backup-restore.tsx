@@ -135,7 +135,7 @@ function BackupTab() {
                                     <span className="w-1.5 h-1.5 rounded-full bg-primary/70" />
                                     <span className="text-[10px] text-primary font-semibold">Ready</span>
                                 </div>
-                                <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center gap-1 shrink-0">
                                     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground" onClick={() => handleDownload(bk)}>
                                         <Download className="w-3 h-3 mr-1" />Download
                                     </Button>
