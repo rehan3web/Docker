@@ -17,7 +17,7 @@ import {
     useGetAiSettings, saveAiSettings, deleteAiSettings,
 } from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { NVIDIA_MODELS } from "@/pages/ai";
+import { NVIDIA_MODELS } from "@/lib/ai-models";
 
 // ── Copy button ────────────────────────────────────────────────────────────────
 

@@ -517,4 +517,85 @@ router.post('/ai/chat', authenticateToken, async (req, res) => {
     }
 });
 
+// ── AI Chat — streaming SSE ───────────────────────────────────────────────────
+
+router.post('/ai/chat/stream', authenticateToken, async (req, res) => {
+    const { messages, systemContext, model: modelOverride } = req.body || {};
+
+    const apiKey = await getSetting('nvidia_api_key');
+    if (!apiKey) {
+        return res.status(400).json({ configured: false, message: 'AI is not configured. Go to Settings → AI.' });
+    }
+    const model = modelOverride || (await getSetting('nvidia_model')) || NVIDIA_DEFAULT_MODEL;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (obj: object) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    };
+
+    try {
+        const openai = new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });
+        const stream = await openai.chat.completions.create({
+            model,
+            messages: [
+                { role: 'system', content: systemContext || 'You are a helpful Docker and DevOps assistant. Be concise and practical.' },
+                ...(messages || []),
+            ],
+            temperature: 0.5,
+            max_tokens: 4096,
+            stream: true,
+        });
+
+        // Tag-aware streaming: separate <thinking> content from main content
+        let inThink = false;
+        let tagBuf  = '';
+        const OPEN_RE  = /^<(thinking|think)>$/;
+        const CLOSE_RE = /^<\/(thinking|think)>$/;
+        const MAX_TAG  = '</thinking>'.length; // longest possible tag
+
+        for await (const chunk of stream) {
+            if (res.writableEnded) break;
+            const raw = chunk.choices[0]?.delta?.content || '';
+            if (!raw) continue;
+
+            for (const ch of raw) {
+                tagBuf += ch;
+
+                // While tagBuf could still be building a tag, hold it
+                const couldBeOpen  = !inThink && ['<thinking>', '<think>'].some(t => t.startsWith(tagBuf));
+                const couldBeClose =  inThink && ['</thinking>', '</think>'].some(t => t.startsWith(tagBuf));
+
+                if (couldBeOpen || couldBeClose) {
+                    if (OPEN_RE.test(tagBuf))  { inThink = true;  tagBuf = ''; continue; }
+                    if (CLOSE_RE.test(tagBuf)) { inThink = false; tagBuf = ''; continue; }
+                    if (tagBuf.length >= MAX_TAG) {
+                        // Buffer too long — flush as content
+                        send({ type: inThink ? 'thinking' : 'content', delta: tagBuf });
+                        tagBuf = '';
+                    }
+                    continue; // still accumulating potential tag
+                }
+
+                // Not a tag candidate — flush buffer + char
+                if (tagBuf.length > 0) {
+                    send({ type: inThink ? 'thinking' : 'content', delta: tagBuf });
+                    tagBuf = '';
+                }
+            }
+        }
+
+        if (tagBuf) send({ type: inThink ? 'thinking' : 'content', delta: tagBuf });
+        if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+
+    } catch (err: any) {
+        send({ error: err?.message || 'Stream failed' });
+        if (!res.writableEnded) res.end();
+    }
+});
+
 export default router;

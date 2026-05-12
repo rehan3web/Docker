@@ -3,6 +3,7 @@ import {
   Sparkles, Bot, User, RotateCcw, Send, Loader2,
   ChevronDown, ChevronRight, AlertTriangle, Sun, Moon, Cpu,
   Lightbulb, Code2, BookOpen, Zap, Copy, Check, BrainCircuit,
+  Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,32 +13,24 @@ import {
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
-import { useGetAiSettings, aiChat } from "@/api/client";
+import { useGetAiSettings, getToken } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
+import { NVIDIA_MODELS } from "@/lib/ai-models";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-// ── Model list (exported for Settings) ────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-export const NVIDIA_MODELS = [
-  { value: "openai/gpt-oss-120b",                                   label: "ChatGPT OSS 120B",         provider: "OpenAI",       thinking: true  },
-  { value: "deepseek-ai/deepseek-v4-pro",                           label: "DeepSeek V4 Pro",          provider: "DeepSeek",     thinking: true  },
-  { value: "moonshotai/kimi-k2-thinking",                           label: "Kimi K2 Thinking",         provider: "Moonshot AI",  thinking: true  },
-  { value: "qwen/qwen3-next-80b-a3b-thinking",                      label: "Qwen3 80B Thinking",       provider: "Alibaba",      thinking: true  },
-  { value: "qwen/qwen3.5-397b-a17b",                                label: "Qwen 3.5 397B",            provider: "Alibaba",      thinking: true  },
-  { value: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",         label: "Nemotron 3 Nano 30B",      provider: "NVIDIA",       thinking: true  },
-  { value: "google/gemma-3-27b-it",                                 label: "Gemma 3 27B",              provider: "Google",       thinking: false },
-  { value: "google/gemma-3-12b-it",                                 label: "Gemma 3 12B",              provider: "Google",       thinking: false },
-  { value: "meta/llama-3.1-8b-instruct",                            label: "Llama 3.1 8B",             provider: "Meta",         thinking: false },
-  { value: "meta/llama-3.3-70b-instruct",                           label: "Llama 3.3 70B",            provider: "Meta",         thinking: false },
-  { value: "mistralai/mistral-large-3-675b-instruct-2512",          label: "Mistral Large 3 675B",     provider: "Mistral AI",   thinking: false },
-  { value: "stepfun-ai/step-3.5-flash",                             label: "Step 3.5 Flash",           provider: "Stepfun AI",   thinking: false },
-];
-
-type ChatMsg = { id: string; role: "user" | "assistant"; content: string };
+type ChatMsg = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  thinking: string;   // streams into this separately
+  streaming?: boolean;
+};
 
 const CHAT_SYSTEM =
   "You are a helpful Docker, DevOps, and infrastructure assistant inside Docklet — a VPS/Docker/PostgreSQL management dashboard. " +
@@ -45,10 +38,10 @@ const CHAT_SYSTEM =
   "Be concise, practical, and give actionable answers. Use markdown for code blocks.";
 
 const SUGGESTION_CARDS = [
-  { icon: Lightbulb, title: "Brainstorm ideas",  desc: "for optimising my Docker setup"       },
-  { icon: Code2,     title: "Write a script",    desc: "to backup PostgreSQL automatically"   },
-  { icon: BookOpen,  title: "Explain a concept", desc: "how does container networking work?"  },
-  { icon: Zap,       title: "Troubleshoot",      desc: "why my container keeps restarting"    },
+  { icon: Lightbulb, title: "Brainstorm ideas",  desc: "for optimising my Docker setup"      },
+  { icon: Code2,     title: "Write a script",    desc: "to backup PostgreSQL automatically"  },
+  { icon: BookOpen,  title: "Explain a concept", desc: "how does container networking work?" },
+  { icon: Zap,       title: "Troubleshoot",      desc: "why my container keeps restarting"   },
 ];
 
 // ── Model dropdown ─────────────────────────────────────────────────────────────
@@ -135,22 +128,17 @@ function SuggestionCards({ onSelect }: { onSelect: (text: string) => void }) {
 // ── Message item ───────────────────────────────────────────────────────────────
 
 function MessageItem({ message }: { message: ChatMsg }) {
-  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const [thinkingOpen, setThinkingOpen] = useState(true); // open while streaming
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Extract <thinking> / <think> tags
-  let content = message.content;
-  let thinkingContent: string | null = null;
-  const thinkRegex = /<(thinking|think)>([\s\S]*?)(?:<\/(thinking|think)>|$)/g;
-  const steps: string[] = [];
-  let match;
-  while ((match = thinkRegex.exec(content)) !== null) {
-    if (match[2]) steps.push(match[2].trim());
-  }
-  if (steps.length > 0) {
-    thinkingContent = steps.join("\n\n");
-    content = content.replace(/<(thinking|think)>([\s\S]*?)(?:<\/(thinking|think)>|$)/g, "").trim();
-  }
+  // Auto-collapse thinking block once streaming is done
+  useEffect(() => {
+    if (!message.streaming && message.thinking) {
+      // leave open for a moment then collapse
+      const t = setTimeout(() => setThinkingOpen(false), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [message.streaming, message.thinking]);
 
   const copyCode = (text: string, id: string) => {
     navigator.clipboard.writeText(text).catch(() => {});
@@ -177,31 +165,35 @@ function MessageItem({ message }: { message: ChatMsg }) {
       </div>
 
       {/* Content */}
-      <div className={cn("flex-1 min-w-0", isUser && "flex justify-end")}>
+      <div className={cn("min-w-0", isUser ? "flex justify-end flex-1" : "flex-1 space-y-3")}>
         {isUser ? (
           <div className="max-w-[80%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed">
-            {content}
+            {message.content}
           </div>
         ) : (
           <div className="max-w-[80%] space-y-3">
             {/* Role label */}
             <div className="text-xs font-semibold text-foreground/60 flex items-center gap-1.5">
               AI
-              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+              {message.streaming && (
+                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+              )}
             </div>
 
-            {/* Thinking block */}
-            {thinkingContent && (
+            {/* ── Thinking block (streams first) ── */}
+            {message.thinking && (
               <div className="rounded-xl border border-primary/20 bg-primary/5 overflow-hidden">
                 <button
                   onClick={() => setThinkingOpen(v => !v)}
                   className="flex w-full items-center gap-2 px-4 py-2.5 text-xs font-medium text-primary/80 hover:bg-primary/10 transition-colors group"
                 >
-                  <BrainCircuit className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
-                  <span>Thinking Process</span>
-                  <span className="text-[11px] opacity-60 font-normal">
-                    ({thinkingContent.split(/\s+/).length} words)
-                  </span>
+                  <BrainCircuit className={cn("w-3.5 h-3.5 transition-transform", message.streaming && "animate-pulse")} />
+                  <span>{message.streaming && !message.content ? "Thinking…" : "Thinking Process"}</span>
+                  {!message.streaming && (
+                    <span className="text-[11px] opacity-60 font-normal">
+                      ({message.thinking.split(/\s+/).filter(Boolean).length} words)
+                    </span>
+                  )}
                   {thinkingOpen
                     ? <ChevronDown className="w-3.5 h-3.5 ml-auto opacity-70" />
                     : <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-70" />
@@ -209,105 +201,106 @@ function MessageItem({ message }: { message: ChatMsg }) {
                 </button>
                 {thinkingOpen && (
                   <div className="px-4 py-3 text-[13px] text-foreground/70 whitespace-pre-wrap leading-relaxed border-t border-primary/10 bg-primary/5">
-                    {thinkingContent}
+                    {message.thinking}
+                    {message.streaming && !message.content && (
+                      <span className="inline-block w-0.5 h-3.5 bg-primary/60 ml-0.5 animate-pulse align-middle" />
+                    )}
                   </div>
                 )}
               </div>
             )}
 
-            {/* Markdown content */}
-            <div className="text-sm leading-relaxed text-foreground/90 prose prose-neutral dark:prose-invert max-w-none prose-sm">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code({ node, inline, className, children, ...props }: any) {
-                    const langMatch = /language-(\w+)/.exec(className || "");
-                    const codeStr = String(children).replace(/\n$/, "");
-                    const codeId = codeStr.slice(0, 20);
-                    if (!inline && langMatch) {
-                      return (
-                        <div className="relative my-4 rounded-xl overflow-hidden border border-border bg-zinc-950 shadow-lg">
-                          <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-white/5">
-                            <div className="flex items-center gap-2">
-                              <div className="flex gap-1.5">
-                                <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
-                                <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
-                                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
+            {/* ── Main content (streams after thinking) ── */}
+            {(message.content || (!message.thinking && message.streaming)) && (
+              <div className="text-sm leading-relaxed text-foreground/90 prose prose-neutral dark:prose-invert max-w-none prose-sm">
+                {message.streaming && !message.content ? (
+                  // Thinking dots while waiting for first content token
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]" />
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.15s]" />
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" />
+                  </div>
+                ) : (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      code({ node, inline, className, children, ...props }: any) {
+                        const langMatch = /language-(\w+)/.exec(className || "");
+                        const codeStr = String(children).replace(/\n$/, "");
+                        const codeId = codeStr.slice(0, 24);
+                        if (!inline && langMatch) {
+                          return (
+                            <div className="relative my-4 rounded-xl overflow-hidden border border-border bg-zinc-950 shadow-lg">
+                              <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-white/5">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex gap-1.5">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
+                                    <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
+                                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
+                                  </div>
+                                  <span className="text-[10px] font-bold text-white/40 tracking-widest uppercase ml-1">{langMatch[1]}</span>
+                                </div>
+                                <button
+                                  onClick={() => copyCode(codeStr, codeId)}
+                                  className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 transition-colors text-white/50 hover:text-white text-[11px] font-medium"
+                                >
+                                  {copiedId === codeId
+                                    ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</>
+                                    : <><Copy className="w-3.5 h-3.5" /> Copy</>
+                                  }
+                                </button>
                               </div>
-                              <span className="text-[10px] font-bold text-white/40 tracking-widest uppercase ml-1">{langMatch[1]}</span>
+                              <SyntaxHighlighter
+                                style={vscDarkPlus}
+                                language={langMatch[1]}
+                                PreTag="div"
+                                customStyle={{ margin: 0, padding: "1.25rem", fontSize: "13px", lineHeight: "1.6", background: "transparent" }}
+                                {...props}
+                              >
+                                {codeStr}
+                              </SyntaxHighlighter>
                             </div>
-                            <button
-                              onClick={() => copyCode(codeStr, codeId)}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 transition-colors text-white/50 hover:text-white text-[11px] font-medium"
-                            >
-                              {copiedId === codeId
-                                ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</>
-                                : <><Copy className="w-3.5 h-3.5" /> Copy</>
-                              }
-                            </button>
-                          </div>
-                          <SyntaxHighlighter
-                            style={vscDarkPlus}
-                            language={langMatch[1]}
-                            PreTag="div"
-                            customStyle={{ margin: 0, padding: "1.25rem", fontSize: "13px", lineHeight: "1.6", background: "transparent" }}
-                            {...props}
-                          >
-                            {codeStr}
-                          </SyntaxHighlighter>
+                          );
+                        }
+                        return (
+                          <code className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[13px] font-mono" {...props}>
+                            {children}
+                          </code>
+                        );
+                      },
+                      p: ({ children }) => <p className="mb-3 last:mb-0 leading-7">{children}</p>,
+                      ul: ({ children }) => <ul className="mb-3 space-y-1 pl-4 list-disc">{children}</ul>,
+                      ol: ({ children }) => <ol className="mb-3 space-y-1 pl-4 list-decimal">{children}</ol>,
+                      li: ({ children }) => <li className="leading-6">{children}</li>,
+                      h1: ({ children }) => <h1 className="text-base font-bold mt-4 mb-2">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-sm font-bold mt-3 mb-1.5">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1">{children}</h3>,
+                      blockquote: ({ children }) => (
+                        <blockquote className="border-l-2 border-primary/40 pl-4 text-muted-foreground italic my-3">{children}</blockquote>
+                      ),
+                      table: ({ children }) => (
+                        <div className="my-3 overflow-x-auto rounded-lg border border-border">
+                          <table className="text-xs w-full">{children}</table>
                         </div>
-                      );
-                    }
-                    return (
-                      <code className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[13px] font-mono" {...props}>
-                        {children}
-                      </code>
-                    );
-                  },
-                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-7">{children}</p>,
-                  ul: ({ children }) => <ul className="mb-3 space-y-1 pl-4 list-disc">{children}</ul>,
-                  ol: ({ children }) => <ol className="mb-3 space-y-1 pl-4 list-decimal">{children}</ol>,
-                  li: ({ children }) => <li className="leading-6">{children}</li>,
-                  h1: ({ children }) => <h1 className="text-base font-bold mt-4 mb-2">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-sm font-bold mt-3 mb-1.5">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1">{children}</h3>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="border-l-2 border-primary/40 pl-4 text-muted-foreground italic my-3">{children}</blockquote>
-                  ),
-                  table: ({ children }) => (
-                    <div className="my-3 overflow-x-auto rounded-lg border border-border">
-                      <table className="text-xs w-full">{children}</table>
-                    </div>
-                  ),
-                  th: ({ children }) => <th className="px-3 py-2 bg-muted/50 font-semibold text-left border-b border-border">{children}</th>,
-                  td: ({ children }) => <td className="px-3 py-2 border-b border-border/50">{children}</td>,
-                  a: ({ href, children }) => (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline underline-offset-2">{children}</a>
-                  ),
-                }}
-              >
-                {content}
-              </ReactMarkdown>
-            </div>
+                      ),
+                      th: ({ children }) => <th className="px-3 py-2 bg-muted/50 font-semibold text-left border-b border-border">{children}</th>,
+                      td: ({ children }) => <td className="px-3 py-2 border-b border-border/50">{children}</td>,
+                      a: ({ href, children }) => (
+                        <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline underline-offset-2">{children}</a>
+                      ),
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                )}
+                {/* Streaming cursor */}
+                {message.streaming && message.content && (
+                  <span className="inline-block w-0.5 h-4 bg-foreground/60 ml-0.5 animate-pulse align-middle" />
+                )}
+              </div>
+            )}
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ── Thinking dots ──────────────────────────────────────────────────────────────
-
-function ThinkingDots() {
-  return (
-    <div className="flex gap-3">
-      <div className="h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-        <Bot className="w-4 h-4 text-primary" />
-      </div>
-      <div className="flex items-center gap-1.5 pt-2.5">
-        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]" />
-        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.15s]" />
-        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" />
       </div>
     </div>
   );
@@ -316,18 +309,22 @@ function ThinkingDots() {
 // ── Composer ───────────────────────────────────────────────────────────────────
 
 function ChatComposer({
-  value, onChange, onSend, disabled, textareaRef,
+  value, onChange, onSend, onStop, streaming, disabled, textareaRef, configured,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
+  onStop: () => void;
+  streaming: boolean;
   disabled: boolean;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
+  configured: boolean;
 }) {
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      onSend();
+      if (streaming) onStop();
+      else onSend();
     }
   };
 
@@ -338,6 +335,10 @@ function ChatComposer({
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }, [value]);
 
+  const placeholder = !configured
+    ? "Set up AI in Settings → AI to start chatting"
+    : "Message AI…";
+
   return (
     <div className="border-t border-border bg-background/80 backdrop-blur-md px-4 py-3">
       <div className="max-w-3xl mx-auto">
@@ -347,23 +348,39 @@ function ChatComposer({
             value={value}
             onChange={e => onChange(e.target.value)}
             onKeyDown={handleKey}
-            placeholder={disabled ? "Set up AI in Settings → AI to start chatting" : "Message AI…"}
-            disabled={disabled}
+            placeholder={placeholder}
+            disabled={disabled && !streaming}
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed min-h-[24px] max-h-[200px] overflow-y-auto"
+            className={cn(
+              "flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed min-h-[24px] max-h-[200px] overflow-y-auto transition-all",
+              // Center placeholder when value is empty
+              !value && "placeholder:text-center text-center",
+              value && "text-left",
+            )}
             style={{ height: "24px" }}
             autoComplete="off"
           />
-          <Button
-            size="icon"
-            onClick={onSend}
-            disabled={disabled || !value.trim()}
-            className="h-8 w-8 shrink-0 rounded-xl"
-          >
-            <Send className="w-3.5 h-3.5" />
-          </Button>
+          {streaming ? (
+            <Button
+              size="icon"
+              variant="outline"
+              onClick={onStop}
+              className="h-8 w-8 shrink-0 rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60"
+            >
+              <Square className="w-3.5 h-3.5 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              onClick={onSend}
+              disabled={disabled || !value.trim()}
+              className="h-8 w-8 shrink-0 rounded-xl"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </Button>
+          )}
         </div>
-        <p className="text-center text-[10px] text-muted-foreground/50 mt-2">
+        <p className="text-center text-[10px] text-muted-foreground/40 mt-2">
           AI can make mistakes. Verify important information.
         </p>
       </div>
@@ -385,37 +402,120 @@ export default function AiPage() {
 
   const [messages, setMessages]   = useState<ChatMsg[]>([]);
   const [input, setInput]         = useState("");
-  const [thinking, setThinking]   = useState(false);
-  const scrollRef  = useRef<HTMLDivElement>(null);
+  const [streaming, setStreaming] = useState(false);
+
+  const scrollRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef    = useRef<AbortController | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, thinking]);
+  }, [messages]);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreaming(false);
+    // Mark last assistant message as done
+    setMessages(prev => prev.map((m, i) =>
+      i === prev.length - 1 && m.role === "assistant"
+        ? { ...m, streaming: false }
+        : m
+    ));
+  }, []);
 
   const send = useCallback(async (text?: string) => {
     const content = (text ?? input).trim();
-    if (!content || thinking) return;
-    if (!configured) { toast.error("Configure your NVIDIA API key in Settings → AI first."); return; }
+    if (!content || streaming) return;
+    if (!configured) {
+      toast.error("Configure your NVIDIA API key in Settings → AI first.");
+      return;
+    }
 
-    const userMsg: ChatMsg = { id: crypto.randomUUID(), role: "user", content };
+    const userMsg: ChatMsg = { id: crypto.randomUUID(), role: "user", content, thinking: "" };
     const aiId = crypto.randomUUID();
+    const aiMsg: ChatMsg   = { id: aiId, role: "assistant", content: "", thinking: "", streaming: true };
 
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, userMsg, aiMsg]);
     setInput("");
-    setThinking(true);
+    setStreaming(true);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     try {
+      const token = getToken();
       const history = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
-      const r = await aiChat(history, CHAT_SYSTEM, chatModel);
-      setMessages(prev => [...prev, { id: aiId, role: "assistant", content: r.content }]);
+
+      const resp = await fetch("/api/terminal/ai/chat/stream", {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body:   JSON.stringify({ messages: history, systemContext: CHAT_SYSTEM, model: chatModel }),
+        signal: ctrl.signal,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ message: "Stream failed" }));
+        throw new Error(err.message || "Stream failed");
+      }
+
+      const reader  = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (raw === "[DONE]") break;
+          try {
+            const evt = JSON.parse(raw) as { type?: string; delta?: string; error?: string };
+            if (evt.error) throw new Error(evt.error);
+            if (!evt.delta) continue;
+
+            if (evt.type === "thinking") {
+              setMessages(prev => prev.map(m =>
+                m.id === aiId ? { ...m, thinking: m.thinking + evt.delta! } : m
+              ));
+            } else {
+              setMessages(prev => prev.map(m =>
+                m.id === aiId ? { ...m, content: m.content + evt.delta! } : m
+              ));
+            }
+          } catch (parseErr: any) {
+            if (parseErr.message !== "Stream failed") continue;
+            throw parseErr;
+          }
+        }
+      }
     } catch (err: any) {
+      if (err.name === "AbortError") return; // user stopped
       toast.error(err.message || "AI request failed");
-      setMessages(prev => [...prev, { id: aiId, role: "assistant", content: `Error: ${err.message}` }]);
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.id === aiId && !last.content && !last.thinking) {
+          return prev.slice(0, -1); // remove empty assistant message
+        }
+        return prev;
+      });
     } finally {
-      setThinking(false);
+      if (abortRef.current === ctrl) abortRef.current = null;
+      setStreaming(false);
+      setMessages(prev => prev.map(m =>
+        m.id === aiId ? { ...m, streaming: false } : m
+      ));
     }
-  }, [input, thinking, configured, messages, chatModel]);
+  }, [input, streaming, configured, messages, chatModel]);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex">
@@ -437,10 +537,24 @@ export default function AiPage() {
                   Configured
                 </Badge>
               )}
+              {streaming && (
+                <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-amber-500/10 text-amber-400 border-amber-400/30 animate-pulse hidden sm:flex">
+                  Streaming
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <ModelDropdown value={chatModel} onChange={setChatModel} />
-              {messages.length > 0 && (
+              {streaming && (
+                <Button
+                  variant="outline" size="sm"
+                  onClick={stop}
+                  className="h-7 text-xs gap-1.5 px-2.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                >
+                  <Square className="w-3 h-3 fill-current" /> Stop
+                </Button>
+              )}
+              {messages.length > 0 && !streaming && (
                 <Button
                   variant="ghost" size="sm"
                   className="h-7 text-xs text-muted-foreground gap-1 px-2"
@@ -473,14 +587,13 @@ export default function AiPage() {
 
         {/* Messages / Empty state */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
-          {messages.length === 0 && !thinking ? (
+          {messages.length === 0 ? (
             <SuggestionCards onSelect={text => send(text)} />
           ) : (
             <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
               {messages.map(m => (
                 <MessageItem key={m.id} message={m} />
               ))}
-              {thinking && <ThinkingDots />}
             </div>
           )}
         </div>
@@ -490,8 +603,11 @@ export default function AiPage() {
           value={input}
           onChange={setInput}
           onSend={() => send()}
-          disabled={!configured || thinking}
+          onStop={stop}
+          streaming={streaming}
+          disabled={!configured}
           textareaRef={textareaRef}
+          configured={configured}
         />
       </div>
     </div>
