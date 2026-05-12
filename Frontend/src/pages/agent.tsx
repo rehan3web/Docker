@@ -1359,7 +1359,7 @@ function ChatArea({
                         <span>{queueCount} message{queueCount > 1 ? "s" : ""} waiting in queue</span>
                     </div>
                 )}
-                <div className="flex gap-2 items-end">
+                <div className="relative">
                     <textarea
                         ref={textareaRef}
                         value={prompt}
@@ -1367,25 +1367,26 @@ function ChatArea({
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onRun(); } }}
                         placeholder={running
                             ? "Type next task… it will be queued automatically"
-                            : "Describe a Docker task… (Enter to run, Shift+Enter for newline)"
+                            : "Describe a Docker task…"
                         }
-                        rows={2}
-                        className="flex-1 resize-none text-sm rounded-lg border border-border bg-muted/30 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground font-sans"
+                        rows={3}
+                        className="w-full resize-none text-sm rounded-lg border border-border bg-muted/30 px-3 pt-2 pb-9 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground font-sans"
                     />
-                    <div className="flex flex-col gap-1 shrink-0">
+                    <div className="absolute bottom-2 right-2 flex items-center gap-2">
+                        <span className="text-[10px] text-muted-foreground select-none">Shift+Enter for new line</span>
                         {running && (
-                            <Button variant="destructive" size="icon" className="h-9 w-10 rounded-lg" onClick={onCancel} title="Stop current task">
-                                <Square className="w-4 h-4" />
+                            <Button variant="destructive" size="icon" className="h-7 w-7 rounded-md" onClick={onCancel} title="Stop current task">
+                                <Square className="w-3.5 h-3.5" />
                             </Button>
                         )}
                         <Button
                             size="icon"
-                            className={cn("rounded-lg w-10 h-9", running ? "bg-amber-500 hover:bg-amber-600 text-white" : "")}
+                            className={cn("h-7 w-7 rounded-md", running ? "bg-amber-500 hover:bg-amber-600 text-white" : "")}
                             onClick={() => onRun()}
                             disabled={!prompt.trim()}
-                            title={running ? `Queue message (#${queueCount + 1})` : "Run"}
+                            title={running ? `Queue message (#${queueCount + 1})` : "Send"}
                         >
-                            {running ? <ListOrdered className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                            {running ? <ListOrdered className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
                         </Button>
                     </div>
                 </div>
