@@ -1,0 +1,39 @@
+root@root:~/Docker# docker ps
+CONTAINER ID   IMAGE                                                    COMMAND                  CREATED          STATUS                    PORTS                                                                                                NAMES
+95a52ee6885c   docklet-docklet-client                                   "caddy run --config …"   12 minutes ago   Up 11 minutes             443/tcp, 2019/tcp, 443/udp, 0.0.0.0:3000->80/tcp                                                     docklet-client
+9fbe0ccbb882   docklet-docklet-server                                   "docker-entrypoint.s…"   12 minutes ago   Up 11 minutes             3001/tcp                                                                                             docklet-server
+c987438a0951   neo4j:latest                                             "tini -g -- /startup…"   2 hours ago      Up 2 hours                0.0.0.0:7474->7474/tcp, [::]:7474->7474/tcp, 7473/tcp, 0.0.0.0:7687->7687/tcp, [::]:7687->7687/tcp   neo4j
+c710f7a106aa   docklet-gsap-awwwards-website-dep_1778565155664_yvl1i0   "/bin/bash -c 'caddy…"   11 hours ago     Up 11 hours                                                                                                                    nb-gsap-awwwards-website-dep_1778565155664_yvl1i0
+e93573866955   moby/buildkit                                            "/usr/bin/buildkitd-…"   11 hours ago     Up 11 hours                                                                                                                    docklet-buildkit
+e966ad95fee8   traefik:v3.3                                             "/entrypoint.sh --lo…"   24 hours ago     Up 11 minutes             0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp                                                             docklet-traefik
+07c2d660b8e9   edoburu/pgbouncer:latest                                 "/entrypoint.sh /usr…"   30 hours ago     Up 11 minutes             127.0.0.1:16543->5432/tcp                                                                            docklet-pooler
+4a1d4f93bd45   postgres:15                                              "docker-entrypoint.s…"   30 hours ago     Up 12 minutes (healthy)   127.0.0.1:15432->5432/tcp                                                                            docklet-db
+fb51ce53af5b   redis:7-alpine                                           "docker-entrypoint.s…"   30 hours ago     Up 12 minutes (healthy)   6379/tcp                                                                                             docklet-redis
+root@root:~/Docker# docker logs -f docklet-server
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+Backend running on port 3001
+[BuildQueue] Reconciled 1 running railpack container(s)
+[BuildQueue] in-memory queue (max 2 parallel builds)
+[Redis] Connected to docklet-redis
+[InfraDB] Connected to dockelt_data
+[Scheduler] Initialized — 0 task(s) loaded
+[ContainerMgmt] Initialized
+[InfraDB] Indexes ensured
+[InfraDB] Indexes ensured
+[InfraDB] Indexes ensured
+[InfraDB] Indexes ensured
+[InfraDB] Indexes ensured
+[InfraDB] Indexes ensured
+^Croot@root:~/Docker# cat .env
+DB_NAME=postgres
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=12345678
+
+JWT_SECRET=replace_with_a_long_random_secret_string
+ACME_EMAIL=rehanweb3.dev@gmail.com
+ENABLE_2FA=true
+root@root:~/Docker# 
