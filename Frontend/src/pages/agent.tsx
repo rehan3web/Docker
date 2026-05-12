@@ -1298,7 +1298,7 @@ function ChatArea({
                                 <Bot className="w-8 h-8 text-primary" />
                             </div>
                             <div>
-                                <h2 className="text-2xl font-normal tracking-tight text-foreground">DevOps Agent</h2>
+                                <h2 className="text-2xl font-normal tracking-tight text-foreground">Docklet Agent</h2>
                                 <p className="text-sm text-muted-foreground mt-2 max-w-xs leading-relaxed">
                                     Describe any Docker task in plain English. The agent plans, executes, and self-heals.
                                 </p>
@@ -1795,15 +1795,15 @@ export default function AgentPage() {
                             <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">
                                 <Bot className="w-4 h-4 text-primary" />
                             </div>
-                            <h1 className="font-semibold text-sm tracking-tight">DevOps Agent</h1>
-                            <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-primary/10 text-primary border-primary/20">AI</Badge>
+                            <h1 className="font-semibold text-sm tracking-tight">Docklet Agent</h1>
+                            <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-primary/10 text-primary border-primary/20 hidden sm:flex">AI</Badge>
                             {queueCount > 0 && (
-                                <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-amber-500/10 text-amber-400 border-amber-400/30 flex items-center gap-1">
+                                <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-amber-500/10 text-amber-400 border-amber-400/30 hidden sm:flex items-center gap-1">
                                     <ListOrdered className="w-2.5 h-2.5" />{queueCount} queued
                                 </Badge>
                             )}
                             {memoryStats && (memoryStats.memoryCount > 0 || memoryStats.ragCount > 0) && (
-                                <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-violet-500/10 text-violet-400 border-violet-400/30 flex items-center gap-1" title={`${memoryStats.memoryCount} memory turns · ${memoryStats.ragCount} RAG entries`}>
+                                <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-violet-500/10 text-violet-400 border-violet-400/30 hidden sm:flex items-center gap-1" title={`${memoryStats.memoryCount} memory turns · ${memoryStats.ragCount} RAG entries`}>
                                     <BrainCircuit className="w-2.5 h-2.5" />Memory
                                 </Badge>
                             )}
