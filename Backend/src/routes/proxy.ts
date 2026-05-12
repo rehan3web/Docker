@@ -49,6 +49,13 @@ async function ensureTable() {
         ALTER TABLE docklet_proxy_domains
         ADD COLUMN IF NOT EXISTS target_host VARCHAR(255) DEFAULT '127.0.0.1'
     `);
+    // Migrate old 127.0.0.1 entries → host.docker.internal so Traefik
+    // (running inside Docker) can reach host ports via the gateway alias.
+    await pool.query(`
+        UPDATE docklet_proxy_domains
+        SET target_host = 'host.docker.internal'
+        WHERE target_host = '127.0.0.1' OR target_host IS NULL
+    `);
     dbReady = true;
 }
 
@@ -206,8 +213,9 @@ router.post('/create', authenticateToken, async (req, res) => {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
         return res.status(400).json({ message: 'Valid port (1–65535) required' });
     }
-    // targetHost defaults to 127.0.0.1 for host-port routes; container name for railpack routes
-    const targetHost: string = (typeof rawHost === 'string' && rawHost.trim()) ? rawHost.trim() : '127.0.0.1';
+    // targetHost defaults to host.docker.internal for host-port routes so Traefik
+    // (running inside Docker) can reach the host's ports via the gateway alias.
+    const targetHost: string = (typeof rawHost === 'string' && rawHost.trim()) ? rawHost.trim() : 'host.docker.internal';
 
     try {
         await ensureTable();
@@ -306,7 +314,11 @@ router.post('/reload', authenticateToken, async (_req, res) => {
         let autoFixed = 0;
         for (const row of rows) {
             let ssl = row.ssl_enabled ?? false;
-            const targetHost = row.target_host || '127.0.0.1';
+            // Normalise legacy 127.0.0.1 rows — Traefik runs inside Docker
+            // and cannot reach the host via 127.0.0.1; use the gateway alias.
+            const targetHost = (!row.target_host || row.target_host === '127.0.0.1')
+                ? 'host.docker.internal'
+                : row.target_host;
             if (!row.verified) {
                 const parentOk = await isParentVerified(row.domain);
                 if (parentOk) {

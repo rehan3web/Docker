@@ -178,6 +178,8 @@ services:
     container_name: docklet-traefik
     image: traefik:v3.3
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - "--log.level=INFO"
       - "--accesslog=true"
