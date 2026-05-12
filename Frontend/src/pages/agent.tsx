@@ -1359,7 +1359,7 @@ function ChatArea({
                         <span>{queueCount} message{queueCount > 1 ? "s" : ""} waiting in queue</span>
                     </div>
                 )}
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-end">
                     <textarea
                         ref={textareaRef}
                         value={prompt}
@@ -1372,15 +1372,15 @@ function ChatArea({
                         rows={2}
                         className="flex-1 resize-none text-sm rounded-lg border border-border bg-muted/30 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground font-sans"
                     />
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-1 shrink-0">
                         {running && (
-                            <Button variant="destructive" size="icon" className="h-9 w-10 shrink-0 rounded-lg" onClick={onCancel} title="Stop current task">
+                            <Button variant="destructive" size="icon" className="h-9 w-10 rounded-lg" onClick={onCancel} title="Stop current task">
                                 <Square className="w-4 h-4" />
                             </Button>
                         )}
                         <Button
                             size="icon"
-                            className={cn("shrink-0 rounded-lg", running ? "h-9 w-10 bg-amber-500 hover:bg-amber-600 text-white" : "h-auto w-10")}
+                            className={cn("rounded-lg w-10 h-9", running ? "bg-amber-500 hover:bg-amber-600 text-white" : "")}
                             onClick={() => onRun()}
                             disabled={!prompt.trim()}
                             title={running ? `Queue message (#${queueCount + 1})` : "Run"}
