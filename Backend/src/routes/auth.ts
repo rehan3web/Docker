@@ -13,6 +13,12 @@ const JWT_SECRET = getJwtSecret();
 const ENABLE_2FA = process.env.ENABLE_2FA === 'true';
 const APP_NAME = 'Docklet';
 
+// Prevent any browser or proxy from caching auth responses
+router.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function totpVerify(secret: string, code: string): boolean {

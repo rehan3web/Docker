@@ -49,7 +49,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
   if (!res.ok) {
     let err: any;
-    try { err = await res.json(); } catch { err = { message: res.statusText }; }
+    try {
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        err = await res.json();
+      } else {
+        // Non-JSON response (proxy error page, backend restarting, etc.)
+        err = { message: res.status === 405 ? "Server is not ready — please try again in a moment." : res.statusText };
+      }
+    } catch { err = { message: "An unexpected error occurred — please try again." }; }
     throw new Error(err?.message || res.statusText);
   }
   return res.json();
