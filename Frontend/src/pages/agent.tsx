@@ -19,6 +19,10 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { getSocket } from "@/api/socket";
 import { apiFetch } from "@/api/client";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -241,6 +245,90 @@ function ContainerListCard({ containers }: { containers: ParsedContainer[] }) {
     );
 }
 
+// ── Shared markdown renderer (same style as ai.tsx) ───────────────────────────
+
+function AgentMarkdown({ content }: { content: string }) {
+    const [copiedId, setCopiedId] = useState<string | null>(null);
+    const copyCode = (text: string, id: string) => {
+        navigator.clipboard.writeText(text).catch(() => {});
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+    };
+    return (
+        <div className="text-sm leading-relaxed text-foreground/90 prose prose-neutral dark:prose-invert max-w-none prose-sm">
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    code({ node, inline, className, children, ...props }: any) {
+                        const langMatch = /language-(\w+)/.exec(className || "");
+                        const codeStr = String(children).replace(/\n$/, "");
+                        const codeId = codeStr.slice(0, 24);
+                        if (!inline && langMatch) {
+                            return (
+                                <div className="relative my-3 rounded-xl overflow-hidden border border-border bg-zinc-950 shadow-lg">
+                                    <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-white/5">
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex gap-1.5">
+                                                <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
+                                                <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
+                                                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
+                                            </div>
+                                            <span className="text-[10px] font-bold text-white/40 tracking-widest uppercase ml-1">{langMatch[1]}</span>
+                                        </div>
+                                        <button
+                                            onClick={() => copyCode(codeStr, codeId)}
+                                            className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 transition-colors text-white/50 hover:text-white text-[11px] font-medium"
+                                        >
+                                            {copiedId === codeId
+                                                ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</>
+                                                : <><Copy className="w-3.5 h-3.5" /> Copy</>
+                                            }
+                                        </button>
+                                    </div>
+                                    <SyntaxHighlighter
+                                        style={vscDarkPlus}
+                                        language={langMatch[1]}
+                                        PreTag="div"
+                                        customStyle={{ margin: 0, padding: "1.25rem", fontSize: "13px", lineHeight: "1.6", background: "transparent" }}
+                                        {...props}
+                                    >
+                                        {codeStr}
+                                    </SyntaxHighlighter>
+                                </div>
+                            );
+                        }
+                        return (
+                            <code className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[13px] font-mono" {...props}>
+                                {children}
+                            </code>
+                        );
+                    },
+                    p:          ({ children }) => <p className="mb-3 last:mb-0 leading-7">{children}</p>,
+                    ul:         ({ children }) => <ul className="mb-3 space-y-1 pl-4 list-disc">{children}</ul>,
+                    ol:         ({ children }) => <ol className="mb-3 space-y-1 pl-4 list-decimal">{children}</ol>,
+                    li:         ({ children }) => <li className="leading-6">{children}</li>,
+                    h1:         ({ children }) => <h1 className="text-base font-bold mt-4 mb-2">{children}</h1>,
+                    h2:         ({ children }) => <h2 className="text-sm font-bold mt-3 mb-1.5">{children}</h2>,
+                    h3:         ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1">{children}</h3>,
+                    blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/40 pl-4 text-muted-foreground italic my-3">{children}</blockquote>,
+                    table:      ({ children }) => (
+                        <div className="my-3 overflow-x-auto rounded-lg border border-border">
+                            <table className="text-xs w-full">{children}</table>
+                        </div>
+                    ),
+                    th: ({ children }) => <th className="px-3 py-2 bg-muted/50 font-semibold text-left border-b border-border">{children}</th>,
+                    td: ({ children }) => <td className="px-3 py-2 border-b border-border/50">{children}</td>,
+                    a:  ({ href, children }) => (
+                        <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline underline-offset-2">{children}</a>
+                    ),
+                }}
+            >
+                {content}
+            </ReactMarkdown>
+        </div>
+    );
+}
+
 // ── Log line renderer (matches ai.tsx style) ──────────────────────────────────
 
 function LogLine({ entry }: { entry: LogEntry }) {
@@ -256,7 +344,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
             return (
                 <div className="flex gap-2 items-start py-1">
                     <Bot className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
-                    <span className="text-sm text-foreground/90">{entry.content}</span>
+                    <AgentMarkdown content={entry.content} />
                 </div>
             );
         case "command":
@@ -1027,9 +1115,7 @@ function SectionEntry({ type, content }: { type: string; content: string }) {
             );
         case "ai":
         default:
-            return (
-                <p className="text-sm text-foreground/90 leading-relaxed py-0.5">{content}</p>
-            );
+            return <AgentMarkdown content={content} />;
     }
 }
 
