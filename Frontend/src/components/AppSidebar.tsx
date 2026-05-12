@@ -116,7 +116,7 @@ const navItems: NavItem[] = [
     { label: "Storage", icon: <Database className="w-4 h-4" strokeWidth={1.5} />, href: "/storage" },
     { label: "Redis Cache", icon: <Zap className="w-4 h-4" strokeWidth={1.5} />, href: "/redis" },
     { label: "AI", icon: <Sparkles className="w-4 h-4" strokeWidth={1.5} />, href: "/ai" },
-    { label: "DevOps Agent", icon: <Bot className="w-4 h-4" strokeWidth={1.5} />, href: "/agent" },
+    { label: "Docklet Agent", icon: <Bot className="w-4 h-4" strokeWidth={1.5} />, href: "/agent" },
 ];
 
 function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
