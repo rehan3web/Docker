@@ -3,7 +3,9 @@ import { DesktopSidebar, MobileSidebarTrigger, IconSettings } from "@/components
 import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sun, Moon, Copy, Check, AlertTriangle, Globe, Lock, PauseCircle, PlayCircle, RefreshCw, Loader2, Shield, QrCode, Key, CheckCircle2, XCircle, ShieldOff } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Sun, Moon, Copy, Check, AlertTriangle, Globe, Lock, PauseCircle, PlayCircle, RefreshCw, Loader2, Shield, QrCode, Key, CheckCircle2, XCircle, ShieldOff, Sparkles, ChevronDown, ExternalLink, Trash2, Cpu } from "lucide-react";
 import { cn, copyToClipboard } from "@/lib/utils";
 import { toast } from "sonner";
 import { Alert } from "@/components/ui/alert";
@@ -12,8 +14,10 @@ import {
     useGetConnectionConfig, exposeDatabase, unexposeDatabase,
     type ConnectionConfig, type ExposeResult,
     twoFaStatus, twoFaSetup, twoFaEnable, twoFaDisable, twoFaChange, twoFaChangeConfirm,
+    useGetAiSettings, saveAiSettings, deleteAiSettings,
 } from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
+import { NVIDIA_MODELS } from "@/pages/ai";
 
 // ── Copy button ────────────────────────────────────────────────────────────────
 
@@ -674,11 +678,175 @@ function TwoFASection() {
     );
 }
 
+// ── AI Configuration section ───────────────────────────────────────────────────
+
+function AiConfigSection() {
+    const qc = useQueryClient();
+    const { data: settings, isLoading } = useGetAiSettings();
+    const configured = settings?.configured ?? false;
+
+    const [apiKey, setApiKey] = useState("");
+    const [model, setModel]   = useState("");
+    const [saving, setSaving]     = useState(false);
+    const [deleting, setDeleting] = useState(false);
+
+    const activeModel = model || settings?.model || NVIDIA_MODELS[0].value;
+    const selModel    = NVIDIA_MODELS.find(m => m.value === activeModel) ?? NVIDIA_MODELS[0];
+
+    async function handleSave() {
+        if (!apiKey.trim() || apiKey.trim().length < 8) {
+            toast.error("Please enter a valid NVIDIA API key (at least 8 characters).");
+            return;
+        }
+        setSaving(true);
+        try {
+            await saveAiSettings(apiKey.trim(), model || undefined);
+            toast.success("AI configured successfully!");
+            setApiKey("");
+            qc.invalidateQueries({ queryKey: ["ai-settings"] });
+        } catch (err: any) { toast.error(err.message || "Failed to save settings"); }
+        finally { setSaving(false); }
+    }
+
+    async function handleDelete() {
+        setDeleting(true);
+        try {
+            await deleteAiSettings();
+            toast.success("AI settings removed.");
+            setModel("");
+            qc.invalidateQueries({ queryKey: ["ai-settings"] });
+        } catch (err: any) { toast.error(err.message || "Failed to remove settings"); }
+        finally { setDeleting(false); }
+    }
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading AI settings…
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex flex-col gap-4">
+            {/* Status */}
+            {configured && settings?.apiKeyMasked && (
+                <div className="flex items-center gap-3 p-3 rounded-xl border border-primary/20 bg-primary/5">
+                    <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20">
+                        <Sparkles className="w-3.5 h-3.5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-primary">AI is active</p>
+                        <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                            {settings.apiKeyMasked} · {settings.model}
+                        </p>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-primary/10 text-primary border-primary/20 shrink-0">
+                        Configured
+                    </Badge>
+                </div>
+            )}
+
+            {/* API Key */}
+            <div className="border border-border rounded-xl bg-card overflow-hidden">
+                <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center gap-2">
+                    <Key className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold text-foreground">
+                        NVIDIA API Key{configured && <span className="text-muted-foreground font-normal ml-1">(enter a new one to replace)</span>}
+                    </span>
+                </div>
+                <div className="p-5 flex flex-col gap-4">
+                    <div className="space-y-1.5">
+                        <Input
+                            type="password"
+                            placeholder="nvapi-…"
+                            value={apiKey}
+                            onChange={e => setApiKey(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") handleSave(); }}
+                            className="h-9 text-xs font-mono"
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                            Get your free key at{" "}
+                            <a href="https://build.nvidia.com" target="_blank" rel="noopener noreferrer"
+                               className="text-primary hover:underline inline-flex items-center gap-0.5">
+                                build.nvidia.com <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                        </p>
+                    </div>
+
+                    {/* Model */}
+                    <div className="space-y-1.5">
+                        <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Default Model</label>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" className="w-full h-9 text-xs justify-between font-sans px-3">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <Cpu className="w-3 h-3 text-muted-foreground shrink-0" />
+                                        <span className="truncate">{selModel.label}</span>
+                                        <span className="text-muted-foreground shrink-0 text-[11px]">{selModel.provider}</span>
+                                        {selModel.thinking && (
+                                            <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 border-primary/30 text-primary bg-primary/5">Thinking</Badge>
+                                        )}
+                                    </div>
+                                    <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-50 ml-2" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent className="w-[340px] rounded-xl p-1.5 shadow-lg">
+                                <p className="px-2.5 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Thinking / Reasoning</p>
+                                {NVIDIA_MODELS.filter(m => m.thinking).map(m => (
+                                    <DropdownMenuItem key={m.value} className="px-2.5 py-2 rounded-lg cursor-pointer gap-2 text-xs" onClick={() => setModel(m.value)}>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className={cn("font-medium truncate", m.value === activeModel && "text-primary")}>{m.label}</span>
+                                                {m.value === activeModel && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+                                            </div>
+                                            <span className="text-muted-foreground text-[11px]">{m.provider}</span>
+                                        </div>
+                                        <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 border-primary/30 text-primary bg-primary/5">Thinking</Badge>
+                                    </DropdownMenuItem>
+                                ))}
+                                <div className="my-1 border-t border-border/50" />
+                                <p className="px-2.5 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Fast / Instruction</p>
+                                {NVIDIA_MODELS.filter(m => !m.thinking).map(m => (
+                                    <DropdownMenuItem key={m.value} className="px-2.5 py-2 rounded-lg cursor-pointer gap-2 text-xs" onClick={() => setModel(m.value)}>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className={cn("font-medium truncate", m.value === activeModel && "text-primary")}>{m.label}</span>
+                                                {m.value === activeModel && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+                                            </div>
+                                            <span className="text-muted-foreground text-[11px]">{m.provider}</span>
+                                        </div>
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <p className="text-[11px] text-muted-foreground">This sets the default model used by AI Chat. You can override per-session in the chat.</p>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2">
+                        <Button size="sm" className="h-8 text-xs gap-1.5" onClick={handleSave} disabled={saving || !apiKey.trim()}>
+                            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                            {configured ? "Update Key" : "Save & Activate"}
+                        </Button>
+                        {configured && (
+                            <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleDelete} disabled={deleting}>
+                                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                Remove Key
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ── Settings page ─────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
     const { theme, toggle } = useTheme();
-    const [tab, setTab] = useState<"database" | "2fa">("database");
+    const [tab, setTab] = useState<"database" | "2fa" | "ai">("database");
 
     return (
         <div className="min-h-screen bg-background text-foreground flex">
@@ -706,7 +874,7 @@ export default function SettingsPage() {
 
                     {/* Tab bar */}
                     <div className="flex gap-1 border border-border rounded-xl p-1 bg-muted/20 w-fit">
-                        {(["database", "2fa"] as const).map(t => (
+                        {(["database", "2fa", "ai"] as const).map(t => (
                             <button
                                 key={t}
                                 onClick={() => setTab(t)}
@@ -715,8 +883,10 @@ export default function SettingsPage() {
                                     tab === t ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
                                 )}
                             >
-                                {t === "database" ? <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" /></svg> : <Shield className="w-3.5 h-3.5" />}
-                                {t === "database" ? "Database" : "2FA"}
+                                {t === "database" && <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" /></svg>}
+                                {t === "2fa" && <Shield className="w-3.5 h-3.5" />}
+                                {t === "ai" && <Sparkles className="w-3.5 h-3.5" />}
+                                {t === "database" ? "Database" : t === "2fa" ? "2FA" : "AI"}
                             </button>
                         ))}
                     </div>
@@ -754,6 +924,16 @@ export default function SettingsPage() {
                                 <div className="flex-1 h-px bg-border" />
                             </div>
                             <TwoFASection />
+                        </section>
+                    )}
+
+                    {tab === "ai" && (
+                        <section className="flex flex-col gap-4">
+                            <div className="flex items-center gap-3">
+                                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">AI Configuration</h3>
+                                <div className="flex-1 h-px bg-border" />
+                            </div>
+                            <AiConfigSection />
                         </section>
                     )}
                 </main>

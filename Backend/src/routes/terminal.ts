@@ -478,16 +478,16 @@ router.post('/ai/sql', authenticateToken, async (req, res) => {
 // ── AI Chat ───────────────────────────────────────────────────────────────────
 
 router.post('/ai/chat', authenticateToken, async (req, res) => {
-    const { messages, systemContext } = req.body || {};
+    const { messages, systemContext, model: modelOverride } = req.body || {};
 
     const apiKey = await getSetting('nvidia_api_key');
     if (!apiKey) {
         return res.status(400).json({
             configured: false,
-            message: 'AI is not configured. Go to the AI page to set up your API key.',
+            message: 'AI is not configured. Go to Settings → AI to set up your API key.',
         });
     }
-    const model = (await getSetting('nvidia_model')) || NVIDIA_DEFAULT_MODEL;
+    const model = modelOverride || (await getSetting('nvidia_model')) || NVIDIA_DEFAULT_MODEL;
 
     try {
         const openai = new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });

@@ -1165,9 +1165,10 @@ export async function aiAnalyzeLogs(data: {
 
 export async function aiChat(
   messages: { role: string; content: string }[],
-  systemContext?: string
+  systemContext?: string,
+  model?: string,
 ): Promise<{ content: string; model: string }> {
-  return apiFetch("/terminal/ai/chat", { method: "POST", body: JSON.stringify({ messages, systemContext }) });
+  return apiFetch("/terminal/ai/chat", { method: "POST", body: JSON.stringify({ messages, systemContext, model }) });
 }
 
 // ── DevOps Agent ───────────────────────────────────────────────────────────────
