@@ -1,0 +1,46 @@
+Memory
+
+Check which containers are runningMemory
+
+Results
+2
+Verifying results…
+
+The request was to check which containers are running, and the execution log successfully lists all running containers with their status and ports.
+
+
+Task Summary
+5
+Memory: 8 turn(s) + 3 relevant past task(s) loaded.
+
+Searching Docker Hub and planning your request…
+
+Plan ready — 1 step(s): message
+
+Based on the live Docker context, the following containers are currently running: 1. **nb-gsap-awwwards-website-dep_1778565155664_yvl1i0** (Up 2 hours) - No ports exposed. 2. **docklet-buildkit** (Up 2 hours) - No ports exposed. 3. **docklet-client** (Up 15 hours) - Port 3000 -> 80/tcp. 4. **docklet-server** (Up 15 hours) - Port 3001 -> 3001/tcp (localhost only). 5. **docklet-traefik** (Up 16 hours) - Ports 80 -> 80/tcp, 443 -> 443/tcp. 6. **neo4j** (Up 17 hours) - Ports 7474 -> 7474/tcp, 7687 -> 7687/tcp. 7. **docklet-pooler** (Up 21 hours) - Port 16543 -> 5432/tcp (localhost only). 8. **docklet-db** (Up 21 hours, healthy) - Port 15432 -> 5432/tcp (localhost only). 9. **docklet-redis** (Up 21 hours, healthy) - Port 6379/tcp (internal only). Additionally, **docklet-traefik-init** is in an 'Exited' state.
+
+Here is the list of running containers based on the live context: - **nb-gsap-awwwards-website-dep_1778565155664_yvl1i0**: Up 2 hours (No ports) - **docklet-buildkit**: Up 2 hours (No ports) - **docklet-client**: Up 15 hours (Port 3000) - **docklet-server**: Up 15 hours (Port 3001) - **docklet-traefik**: Up 16 hours (Ports 80, 443) - **neo4j**: Up 17 hours (Ports 7474, 7687) - **docklet-pooler**: Up 21 hours (Port 16543) - **docklet-db**: Up 21 hours, healthy (Port 15432) - **docklet-redis**: Up 21 hours, healthy (Port 6379) Note: **docklet-traefik-init** is currently stopped (Exited).
+
+
+Fixes Applied
+1
+
+Raw Execution Log
+9 lines
+chck running conatiner
+chck running conatiner
+chck running conatinerMemory
+chck running conatinerMemory
+
+Status
+3
+Memory: 8 turn(s) + 3 relevant past task(s) loaded.
+
+Found 3 relevant past fix(es) in knowledge base.
+
+Plan ready — 1 step(s): message
+
+
+Planning
+1
+Searching Docker Hub and planning your request…

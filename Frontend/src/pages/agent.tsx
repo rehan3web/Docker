@@ -1108,12 +1108,6 @@ function ChatMessageView({ message, isLast, running, onCancelQueue }: {
             <div className="flex justify-end">
                 <div className="relative max-w-[85%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed">
                     {message.userText}
-                    {message.usedMemory && (
-                        <span className="absolute -bottom-2 left-2 flex items-center gap-1 text-[9px] bg-violet-500/20 text-violet-400 border border-violet-400/30 rounded-full px-1.5 py-0.5">
-                            <BrainCircuit className="w-2.5 h-2.5" />
-                            Memory
-                        </span>
-                    )}
                 </div>
             </div>
 
@@ -1465,12 +1459,27 @@ export default function AgentPage() {
 
         // ── Queue events ──────────────────────────────────────────────────────
         const onQueued = (data: { agentId: string; queueId: string; position: number; message: string }) => {
-            setQueueCount(prev => prev + 1);
-            setMessages(prev => [...prev, {
-                id: data.agentId, userText: data.message, sections: [], done: false,
-                success: false, taskType: "general", intent: data.message, summary: "",
-                rawLogs: [], status: "queued", queueId: data.queueId, queuePosition: data.position,
-            }]);
+            setMessages(prev => {
+                const idx = findIdx(prev, data.agentId);
+                if (idx >= 0) {
+                    // Already pre-added by run() — just update status/queue info
+                    const updated = {
+                        ...prev[idx],
+                        status: "queued" as ChatMessage["status"],
+                        queueId: data.queueId,
+                        queuePosition: data.position,
+                    };
+                    return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)];
+                }
+                // Not found (e.g. another tab) — add fresh
+                setQueueCount(q => q + 1);
+                return [...prev, {
+                    id: data.agentId, userText: data.message, sections: [], done: false,
+                    success: false, taskType: "general", intent: data.message, summary: "",
+                    rawLogs: [], status: "queued" as ChatMessage["status"],
+                    queueId: data.queueId, queuePosition: data.position,
+                }];
+            });
         };
 
         const onDequeued = (data: { agentId: string; queueId: string }) => {
