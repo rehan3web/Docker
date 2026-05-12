@@ -150,9 +150,6 @@ export default function VisualizerPage() {
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" className="h-8 rounded-full border-border hover:bg-muted font-medium text-xs text-foreground bg-transparent" onClick={() => refetch()}>
-                                <RefreshCw className="w-3.5 h-3.5 mr-2" />Refresh
-                            </Button>
                             <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors" onClick={toggle} aria-label="Toggle theme">
                                 {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                             </Button>

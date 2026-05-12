@@ -678,9 +678,6 @@ function HistoryPanel({ onRerun }: { onRerun: (intent: string) => void }) {
             <div className="flex flex-col h-full gap-3">
                 <div className="flex items-center justify-between">
                     <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Recent Tasks</span>
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1.5" onClick={load}>
-                        <RefreshCw className="w-3.5 h-3.5" />Refresh
-                    </Button>
                 </div>
                 <div className="overflow-y-auto flex-1 space-y-1.5">
                     {loading && <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>}
@@ -739,9 +736,6 @@ function KnowledgePanel({ onInsert }: { onInsert: (text: string) => void }) {
         <div className="flex flex-col h-full gap-3">
             <div className="flex items-center justify-between">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Learned Fixes & Patterns</span>
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1.5" onClick={load}>
-                    <RefreshCw className="w-3.5 h-3.5" />Refresh
-                </Button>
             </div>
             <div className="overflow-y-auto flex-1 space-y-1.5">
                 {loading && <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>}

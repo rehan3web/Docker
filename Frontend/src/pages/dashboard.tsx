@@ -111,15 +111,6 @@ export default function Dashboard() {
                 )}
               </Button>
 
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-full border-border hover:bg-muted font-medium text-xs text-foreground bg-transparent"
-                onClick={handleRefresh}
-              >
-                <RefreshCw className="w-3.5 h-3.5 mr-2" />
-                Refresh
-              </Button>
             </div>
           </div>
         </header>

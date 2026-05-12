@@ -128,9 +128,6 @@ export default function RedisPage() {
                             <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground" onClick={toggle}>
                                 {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                             </Button>
-                            <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={() => refetch()}>
-                                <RefreshCw className="w-3.5 h-3.5 mr-2" /> Refresh
-                            </Button>
                         </div>
                     </div>
                 </header>
