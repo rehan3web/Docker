@@ -36,13 +36,24 @@ import {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function stripAnsi(str: string): string {
   return str
+    // Standard CSI sequences  e.g. \e[1;32m
     .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "")
+    // OSC sequences  e.g. \e]0;title\x07
     .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
+    // DCS / PM / APC sequences
     .replace(/\x1B[PX^_][^\x1B]*(?:\x1B\\)/g, "")
+    // Two-char escape sequences
     .replace(/\x1B[ -/]+[@-~]/g, "")
     .replace(/\x1B[@-~]/g, "")
+    // Any remaining lone ESC
     .replace(/\x1B/g, "")
+    // C1 control codes (0x80–0x9F)
     .replace(/[\x80-\x9F]/g, "")
+    // Readline prompt-ignore markers \x01 / \x02 — these show as □
+    .replace(/[\x01\x02]/g, "")
+    // Other non-printable C0 controls (keep \t \n, strip the rest)
+    .replace(/[\x00\x03-\x08\x0b\x0c\x0e-\x1f]/g, "")
+    // Carriage return
     .replace(/\r/g, "");
 }
 
