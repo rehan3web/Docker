@@ -2149,6 +2149,33 @@ router.post('/cancel', authenticateToken, async (req, res) => {
     res.json({ cancelled: true, agentId });
 });
 
+// Force-stop whatever agent is currently running for this user (even if
+// the frontend session lost track of the agentId after a page refresh).
+router.post('/force-stop', authenticateToken, (req, res) => {
+    const userId        = getUserId(req);
+    const runningId     = activeAgents.get(userId);
+    if (runningId) {
+        cancelAgent(runningId);
+        emitToUser(userId, 'agent:done', {
+            agentId: runningId,
+            success: false,
+            summary: 'Force-stopped by user',
+        });
+    }
+    res.json({ stopped: true, agentId: runningId ?? null });
+});
+
+// Clear every item from the user's queue at once.
+router.delete('/queue', authenticateToken, (req, res) => {
+    const userId = getUserId(req);
+    const q      = userQueues.get(userId) ?? [];
+    const ids    = q.map(qi => qi.queueId);
+    userQueues.set(userId, []);
+    ids.forEach(qid => emitToUser(userId, 'agent:queue_cancelled', { queueId: qid }));
+    emitToUser(userId, 'agent:queue_update', { items: [] });
+    res.json({ cleared: true, count: ids.length });
+});
+
 router.post('/install-docker', authenticateToken, async (req, res) => {
     const { agentId } = req.body || {};
     const userId = getUserId(req);

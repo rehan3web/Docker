@@ -1683,6 +1683,33 @@ export default function AgentPage() {
         }
     }, []);
 
+    const resetQueue = useCallback(async () => {
+        try {
+            await apiFetch("/agent/queue", { method: "DELETE" });
+            setQueueCount(0);
+            toast.success("Queue cleared");
+        } catch (e: any) {
+            toast.error("Failed to clear queue");
+        }
+    }, []);
+
+    const forceStop = useCallback(async () => {
+        try {
+            const res = await apiFetch<{ stopped: boolean; agentId: string | null }>("/agent/force-stop", { method: "POST" });
+            setRunning(false);
+            if (res.agentId) {
+                setMessages(prev => prev.map(m =>
+                    m.id === res.agentId
+                        ? { ...m, done: true, status: "failed" as ChatMessage["status"], summary: "Force-stopped" }
+                        : m
+                ));
+            }
+            toast.success("Agent force-stopped");
+        } catch (e: any) {
+            toast.error("Failed to force-stop agent");
+        }
+    }, []);
+
     const installDocker = useCallback(async () => {
         setDockerMissing(false); setRunning(true);
         const id = `ag_docker_${Date.now()}`;
@@ -1804,6 +1831,28 @@ export default function AgentPage() {
                             )}
                         </div>
                         <div className="flex items-center gap-2">
+                            {queueCount > 0 && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2.5 text-xs gap-1.5 border-amber-400/40 text-amber-400 hover:bg-amber-400/10 hover:text-amber-300"
+                                    onClick={resetQueue}
+                                    title="Clear all queued messages"
+                                >
+                                    <X className="w-3 h-3" />
+                                    Reset Queue
+                                </Button>
+                            )}
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2.5 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                                onClick={forceStop}
+                                title="Force-stop any running agent, including hidden sessions from previous page loads"
+                            >
+                                <Square className="w-3 h-3" />
+                                Force Stop
+                            </Button>
                             <Button
                                 variant="ghost" size="icon"
                                 className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground"
