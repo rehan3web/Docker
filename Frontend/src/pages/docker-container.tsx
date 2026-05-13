@@ -616,10 +616,10 @@ function TerminalTab({ container }: { container: DockerContainer }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex-1 flex flex-col overflow-hidden">
       {/* AI Command Assist */}
       {aiConfigured && (
-        <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+        <div className="shrink-0 border-b border-violet-500/20 bg-violet-500/5">
           <div className="px-4 py-2 border-b border-violet-500/20 flex items-center gap-2">
             <Sparkles className="w-3.5 h-3.5 text-violet-500" />
             <span className="text-[10px] font-medium uppercase tracking-wider text-violet-500/80">AI Command Assist</span>
@@ -638,22 +638,12 @@ function TerminalTab({ container }: { container: DockerContainer }) {
             </Button>
           </form>
           {aiSuggestion && (
-            <div className="border-t border-violet-500/20 px-3 py-2 flex items-center gap-2 bg-[#0d0d0d]">
-              <span className="font-mono text-xs text-violet-300 flex-1 break-all">{aiSuggestion}</span>
-              <Button
-                size="sm"
-                className="h-7 text-[10px] gap-1 shrink-0 bg-violet-500/20 border border-violet-500/30 text-violet-300 hover:bg-violet-500/30"
-                onClick={useAiSuggestion}
-                disabled={!connected}
-              >
+            <div className="border-t border-violet-500/20 px-3 py-2 flex items-center gap-2 bg-violet-500/5">
+              <span className="font-mono text-xs text-violet-600 dark:text-violet-300 flex-1 break-all">{aiSuggestion}</span>
+              <Button size="sm" className="h-7 text-[10px] gap-1 shrink-0 bg-violet-500/20 border border-violet-500/30 text-violet-600 dark:text-violet-300 hover:bg-violet-500/30" onClick={useAiSuggestion} disabled={!connected}>
                 <Play className="w-2.5 h-2.5" />Run
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0 text-muted-foreground"
-                onClick={() => setAiSuggestion(null)}
-              >
+              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground" onClick={() => setAiSuggestion(null)}>
                 <XCircle className="w-3.5 h-3.5" />
               </Button>
             </div>
@@ -661,33 +651,47 @@ function TerminalTab({ container }: { container: DockerContainer }) {
         </div>
       )}
 
-      {/* Terminal Shell */}
-      <div className="rounded-xl border border-border overflow-hidden">
-        <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+      {/* Terminal Shell — full height, theme-aware */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Title bar */}
+        <div className="shrink-0 px-4 py-2.5 border-b flex items-center justify-between bg-[#efefef] dark:bg-[#181818] border-[#e0e0e0] dark:border-[#252525]">
           <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-muted-foreground" />
-            <span className="text-xs font-medium">Container Shell</span>
+            <span className="w-3 h-3 rounded-full bg-[#ff5f57] border border-[#e0443e]" />
+            <span className="w-3 h-3 rounded-full bg-[#febc2e] border border-[#d4a012]" />
+            <span className="w-3 h-3 rounded-full bg-[#28c840] border border-[#14ae2c]" />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Terminal className="w-3 h-3 text-[#aaa] dark:text-[#555]" />
+            <span className="text-[11px] font-mono select-none text-[#aaa] dark:text-[#555]">
+              {(container.names[0] || container.shortId).replace(/^\//, "")} — sh
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-muted-foreground"}`} />
-            <span className="text-[10px] text-muted-foreground">{connected ? "Connected" : error ? "Error" : "Connecting…"}</span>
+            <div className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-[#aaa]"}`} />
+            <span className="text-[10px] text-[#aaa] dark:text-[#555]">{connected ? "Connected" : error ? "Error" : "Connecting…"}</span>
           </div>
         </div>
+
+        {/* Output */}
         <div
           ref={outputRef}
-          className="h-[440px] overflow-y-auto bg-[#0d0d0d] p-4 font-mono text-[12px] text-green-400 leading-relaxed cursor-text"
+          className="flex-1 overflow-y-auto p-4 font-mono text-[13px] leading-relaxed cursor-text bg-[#f8f8f8] dark:bg-[#0d0d0d]"
           onClick={() => inputRef.current?.focus()}
         >
-          {lines.map((line, i) => <div key={i} className="whitespace-pre-wrap break-all">{line}</div>)}
+          {lines.map((line, i) => (
+            <div key={i} className="whitespace-pre-wrap break-all text-[#166534] dark:text-[#86efac]">{line}</div>
+          ))}
           {!connected && !error && (
-            <div className="flex items-center gap-2 text-muted-foreground text-xs">
+            <div className="flex items-center gap-2 text-[#aaa] dark:text-[#555] text-xs">
               <Loader2 className="w-3 h-3 animate-spin" />Connecting to container shell…
             </div>
           )}
-          {error && <div className="text-red-400 text-xs">{error}</div>}
+          {error && <div className="text-[#dc2626] dark:text-[#f87171] text-xs">{error}</div>}
         </div>
-        <form onSubmit={sendInput} className="border-t border-border bg-[#111] flex items-center px-3 py-2 gap-2">
-          <span className="font-mono text-xs text-green-500 shrink-0">$</span>
+
+        {/* Input */}
+        <form onSubmit={sendInput} className="shrink-0 border-t flex items-center px-3 py-2 gap-2 bg-[#efefef] dark:bg-[#181818] border-[#e0e0e0] dark:border-[#252525]">
+          <span className="font-mono text-xs text-[#16a34a] dark:text-[#4ade80] shrink-0">$</span>
           <input
             ref={inputRef}
             value={input}
@@ -696,19 +700,21 @@ function TerminalTab({ container }: { container: DockerContainer }) {
               if (e.key === "c" && e.ctrlKey) { socket.emit("docker:exec:input", "\x03"); setInput(""); e.preventDefault(); }
               if (e.key === "l" && e.ctrlKey) { setLines([]); e.preventDefault(); }
             }}
-            className="flex-1 bg-transparent font-mono text-xs text-green-400 outline-none placeholder:text-muted-foreground/30"
+            className="flex-1 bg-transparent font-mono text-xs text-[#111] dark:text-[#e5e5e5] outline-none placeholder:text-[#aaa] dark:placeholder:text-[#555]"
             placeholder={connected ? "Type a command…" : "Waiting for connection…"}
             disabled={!connected}
             autoComplete="off"
             spellCheck={false}
           />
-          <Button type="submit" size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground" disabled={!connected || !input.trim()}>
+          <Button type="submit" size="sm" variant="ghost" className="h-6 w-6 p-0 text-[#aaa] dark:text-[#555]" disabled={!connected || !input.trim()}>
             <Play className="w-3 h-3" />
           </Button>
         </form>
-        <div className="px-4 py-2 border-t border-border bg-[#0d0d0d] flex gap-4 text-[10px] text-muted-foreground">
-          <span><kbd className="font-mono bg-muted px-1 rounded">Ctrl+C</kbd> interrupt</span>
-          <span><kbd className="font-mono bg-muted px-1 rounded">Ctrl+L</kbd> clear</span>
+
+        {/* Hints */}
+        <div className="shrink-0 px-4 py-2 border-t flex gap-4 text-[10px] text-[#aaa] dark:text-[#555] bg-[#f8f8f8] dark:bg-[#0d0d0d] border-[#e0e0e0] dark:border-[#252525]">
+          <span><kbd className="font-mono bg-[#e0e0e0] dark:bg-[#222] text-[#555] dark:text-[#999] px-1 rounded">Ctrl+C</kbd> interrupt</span>
+          <span><kbd className="font-mono bg-[#e0e0e0] dark:bg-[#222] text-[#555] dark:text-[#999] px-1 rounded">Ctrl+L</kbd> clear</span>
         </div>
       </div>
     </div>
@@ -1785,7 +1791,9 @@ export default function ContainerDetailPage() {
         </header>
 
         {/* Content */}
-        <main className="flex-1 px-4 py-6 max-w-4xl w-full mx-auto pb-24">
+        <main className={activeTab === "terminal"
+          ? "flex-1 flex flex-col overflow-hidden"
+          : "flex-1 px-4 py-6 max-w-4xl w-full mx-auto pb-24"}>
           {activeTab === "action" && <ActionTab container={container} onRefresh={refresh} />}
           {activeTab === "terminal" && <TerminalTab container={container} />}
           {activeTab === "environment" && <EnvironmentTab containerName={containerName} />}
