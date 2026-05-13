@@ -20,6 +20,7 @@ import containerMgmtRoutes, { initContainerManagement } from './routes/container
 import domainsRoutes from './routes/domains';
 import agentRoutes from './routes/agent';
 import redisRoutes from './routes/redis';
+import usersRoutes from './routes/users';
 import { registerSshSocketHandlers } from './routes/ssh';
 import { registerDockerExecSocketHandlers } from './routes/docker';
 import { setIo } from './lib/socket';
@@ -89,6 +90,7 @@ app.use('/api/mgmt', containerMgmtRoutes);
 app.use('/api/domains', domainsRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api/redis', redisRoutes);
+app.use('/api/users', usersRoutes);
 
 // ── Socket.IO JWT handshake middleware ────────────────────────────────────────
 // Reject any socket that does not present a valid bearer token. Authenticated
@@ -155,6 +157,7 @@ server.listen(Number(PORT), '0.0.0.0', () => {
     getInfraConnection()
         .then(() => console.log('[InfraDB] Connected to dockelt_data'))
         .catch(err => console.error('[InfraDB] Init error:', err.message));
+    import('./lib/usersDb').then(m => m.initUsersTable()).catch(err => console.error('[Users] Table init error:', err.message));
     initScheduler();
     initBuildQueue().catch(err => console.error('[BuildQueue] Init error:', err.message));
     initContainerManagement().catch(err => console.error('[ContainerMgmt] Init failed:', err.message));

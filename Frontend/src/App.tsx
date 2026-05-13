@@ -24,18 +24,19 @@ import DomainsPage from "@/pages/domains";
 import AiPage from "@/pages/ai";
 import AgentPage from "@/pages/agent";
 import RedisPage from "@/pages/redis";
+import UsersPage from "@/pages/users";
 import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import TwoFASetupOverlay from "@/components/TwoFASetupOverlay";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { getToken, clearToken } from "@/api/client";
+import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
+import { ShieldX } from "lucide-react";
 
 const queryClient = new QueryClient();
 
 // ── JWT expiry guard ──────────────────────────────────────────────────────────
-// Proactively watches the JWT exp claim and logs the user out the moment
-// the token expires, even while the tab is idle.
 
 function useTokenExpiryGuard() {
   const [, navigate] = useLocation();
@@ -52,13 +53,9 @@ function useTokenExpiryGuard() {
         const exp: number | undefined = payload.exp;
         if (!exp) return;
         const msLeft = exp * 1000 - Date.now();
-        if (msLeft <= 0) {
-          doLogout();
-          return;
-        }
-        // Fire exactly when the token expires (capped at JS max safe timeout ~24 days)
+        if (msLeft <= 0) { doLogout(); return; }
         timer = setTimeout(doLogout, Math.min(msLeft, 2_147_483_647));
-      } catch { /* malformed token — leave it for the next API call to handle */ }
+      } catch { /* malformed token */ }
     }
 
     function doLogout() {
@@ -69,12 +66,9 @@ function useTokenExpiryGuard() {
     }
 
     scheduleCheck();
-
-    // Re-evaluate when the user switches back to the tab (handles long idle periods)
     const onVisible = () => { if (document.visibilityState === "visible") scheduleCheck(); };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", scheduleCheck);
-
     return () => {
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
@@ -82,6 +76,33 @@ function useTokenExpiryGuard() {
     };
   }, [navigate]);
 }
+
+// ── Access Denied ─────────────────────────────────────────────────────────────
+
+function AccessDenied() {
+  const [, navigate] = useLocation();
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 select-none">
+      <div className="w-16 h-16 rounded-2xl bg-destructive/10 border border-destructive/20 flex items-center justify-center">
+        <ShieldX className="w-7 h-7 text-destructive" />
+      </div>
+      <div className="text-center space-y-1">
+        <h2 className="text-lg font-semibold text-foreground">Access Denied</h2>
+        <p className="text-sm text-muted-foreground max-w-xs">
+          You don't have permission to access this feature. Contact your administrator to request access.
+        </p>
+      </div>
+      <button
+        onClick={() => navigate("/")}
+        className="text-sm text-primary hover:underline mt-1"
+      >
+        Go to Dashboard
+      </button>
+    </div>
+  );
+}
+
+// ── Route guards ──────────────────────────────────────────────────────────────
 
 function PrivateRoute({ component: Component }: { component: React.ComponentType }) {
   const [, navigate] = useLocation();
@@ -93,6 +114,42 @@ function PrivateRoute({ component: Component }: { component: React.ComponentType
   }, [token]);
 
   if (!token) return null;
+  return <Component />;
+}
+
+function FeatureRoute({
+  component: Component,
+  feature,
+}: {
+  component: React.ComponentType;
+  feature: string;
+}) {
+  const [, navigate] = useLocation();
+  const token = getToken();
+  const { hasFeature } = useAuth();
+  useTokenExpiryGuard();
+
+  useEffect(() => {
+    if (!token) navigate("/login");
+  }, [token]);
+
+  if (!token) return null;
+  if (!hasFeature(feature)) return <AccessDenied />;
+  return <Component />;
+}
+
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const [, navigate] = useLocation();
+  const token = getToken();
+  const { user } = useAuth();
+  useTokenExpiryGuard();
+
+  useEffect(() => {
+    if (!token) navigate("/login");
+  }, [token]);
+
+  if (!token) return null;
+  if (!user?.isAdmin) return <AccessDenied />;
   return <Component />;
 }
 
@@ -108,29 +165,32 @@ function PublicRoute({ component: Component }: { component: React.ComponentType 
   return <Component />;
 }
 
+// ── Router ────────────────────────────────────────────────────────────────────
+
 function Router() {
   return (
     <Switch>
-      <Route path="/">{() => <PrivateRoute component={Dashboard} />}</Route>
-      <Route path="/table-editor">{() => <PrivateRoute component={TableEditorPage} />}</Route>
-      <Route path="/sql-editor">{() => <PrivateRoute component={SqlEditorPage} />}</Route>
-      <Route path="/statistics">{() => <PrivateRoute component={StatisticsPage} />}</Route>
-      <Route path="/visualizer">{() => <PrivateRoute component={VisualizerPage} />}</Route>
+      <Route path="/">{() => <FeatureRoute component={Dashboard} feature="dashboard" />}</Route>
+      <Route path="/table-editor">{() => <FeatureRoute component={TableEditorPage} feature="table-editor" />}</Route>
+      <Route path="/sql-editor">{() => <FeatureRoute component={SqlEditorPage} feature="sql-editor" />}</Route>
+      <Route path="/statistics">{() => <FeatureRoute component={StatisticsPage} feature="statistics" />}</Route>
+      <Route path="/visualizer">{() => <FeatureRoute component={VisualizerPage} feature="visualizer" />}</Route>
+      <Route path="/backup-restore">{() => <FeatureRoute component={BackupRestorePage} feature="backup-restore" />}</Route>
+      <Route path="/vps">{() => <FeatureRoute component={VpsPage} feature="vps" />}</Route>
+      <Route path="/terminal">{() => <FeatureRoute component={TerminalPage} feature="terminal" />}</Route>
+      <Route path="/ssh">{() => <FeatureRoute component={SshPage} feature="ssh" />}</Route>
+      <Route path="/docker">{() => <FeatureRoute component={DockerPage} feature="docker" />}</Route>
+      <Route path="/docker/:id">{() => <FeatureRoute component={ContainerDetailPage} feature="docker" />}</Route>
+      <Route path="/deploy">{() => <FeatureRoute component={DeployPage} feature="deploy" />}</Route>
+      <Route path="/proxy">{() => <FeatureRoute component={ProxyPage} feature="proxy" />}</Route>
+      <Route path="/scheduler">{() => <FeatureRoute component={SchedulerPage} feature="scheduler" />}</Route>
+      <Route path="/storage">{() => <FeatureRoute component={StoragePage} feature="storage" />}</Route>
+      <Route path="/domains">{() => <FeatureRoute component={DomainsPage} feature="domains" />}</Route>
+      <Route path="/ai">{() => <FeatureRoute component={AiPage} feature="ai" />}</Route>
+      <Route path="/agent">{() => <FeatureRoute component={AgentPage} feature="agent" />}</Route>
+      <Route path="/redis">{() => <FeatureRoute component={RedisPage} feature="redis" />}</Route>
       <Route path="/settings">{() => <PrivateRoute component={SettingsPage} />}</Route>
-      <Route path="/backup-restore">{() => <PrivateRoute component={BackupRestorePage} />}</Route>
-      <Route path="/vps">{() => <PrivateRoute component={VpsPage} />}</Route>
-      <Route path="/terminal">{() => <PrivateRoute component={TerminalPage} />}</Route>
-      <Route path="/ssh">{() => <PrivateRoute component={SshPage} />}</Route>
-      <Route path="/docker">{() => <PrivateRoute component={DockerPage} />}</Route>
-      <Route path="/docker/:id">{(params) => <PrivateRoute component={() => <ContainerDetailPage />} />}</Route>
-      <Route path="/deploy">{() => <PrivateRoute component={DeployPage} />}</Route>
-      <Route path="/proxy">{() => <PrivateRoute component={ProxyPage} />}</Route>
-      <Route path="/scheduler">{() => <PrivateRoute component={SchedulerPage} />}</Route>
-      <Route path="/storage">{() => <PrivateRoute component={StoragePage} />}</Route>
-      <Route path="/domains">{() => <PrivateRoute component={DomainsPage} />}</Route>
-      <Route path="/ai">{() => <PrivateRoute component={AiPage} />}</Route>
-      <Route path="/agent">{() => <PrivateRoute component={AgentPage} />}</Route>
-      <Route path="/redis">{() => <PrivateRoute component={RedisPage} />}</Route>
+      <Route path="/users">{() => <AdminRoute component={UsersPage} />}</Route>
       <Route path="/login">{() => <PublicRoute component={LoginPage} />}</Route>
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route component={NotFound} />

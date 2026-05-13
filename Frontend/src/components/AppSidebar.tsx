@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock, Database, ShieldCheck, Sparkles, Zap, Bot } from "lucide-react";
+import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock, Database, ShieldCheck, Sparkles, Zap, Bot, Users } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 import { clearToken } from "@/api/client";
+import { useAuth } from "@/hooks/use-auth";
 
 export function IconDashboard({ className }: { className?: string }) {
     return (
@@ -96,28 +97,32 @@ type NavItem = {
     label: string;
     icon: React.ReactNode;
     href: string;
+    feature: string;
 };
 
 const navItems: NavItem[] = [
-    { label: "Dashboard", icon: <IconDashboard />, href: "/" },
-    { label: "Table Editor", icon: <IconTableEditor />, href: "/table-editor" },
-    { label: "SQL Editor", icon: <IconSQLEditor />, href: "/sql-editor" },
-    { label: "Statistics", icon: <IconStatistics />, href: "/statistics" },
-    { label: "Visualizer", icon: <IconVisualizer />, href: "/visualizer" },
-    { label: "Backup & Restore", icon: <IconBackupRestore />, href: "/backup-restore" },
-    { label: "VPS", icon: <Server className="w-4 h-4" strokeWidth={1.5} />, href: "/vps" },
-    { label: "AI Terminal", icon: <Terminal className="w-4 h-4" strokeWidth={1.5} />, href: "/terminal" },
-    { label: "SSH", icon: <PlugZap className="w-4 h-4" strokeWidth={1.5} />, href: "/ssh" },
-    { label: "Docker", icon: <Container className="w-4 h-4" strokeWidth={1.5} />, href: "/docker" },
-    { label: "Auto Deploy", icon: <GitBranch className="w-4 h-4" strokeWidth={1.5} />, href: "/deploy" },
-    { label: "Reverse Proxy", icon: <Globe className="w-4 h-4" strokeWidth={1.5} />, href: "/proxy" },
-    { label: "Domains", icon: <ShieldCheck className="w-4 h-4" strokeWidth={1.5} />, href: "/domains" },
-    { label: "Scheduler", icon: <Clock className="w-4 h-4" strokeWidth={1.5} />, href: "/scheduler" },
-    { label: "Storage", icon: <Database className="w-4 h-4" strokeWidth={1.5} />, href: "/storage" },
-    { label: "Redis Cache", icon: <Zap className="w-4 h-4" strokeWidth={1.5} />, href: "/redis" },
-    { label: "AI", icon: <Sparkles className="w-4 h-4" strokeWidth={1.5} />, href: "/ai" },
-    { label: "Docklet Agent", icon: <Bot className="w-4 h-4" strokeWidth={1.5} />, href: "/agent" },
+    { label: "Dashboard",      icon: <IconDashboard />,                                       href: "/",              feature: "dashboard" },
+    { label: "Table Editor",   icon: <IconTableEditor />,                                     href: "/table-editor",  feature: "table-editor" },
+    { label: "SQL Editor",     icon: <IconSQLEditor />,                                       href: "/sql-editor",    feature: "sql-editor" },
+    { label: "Statistics",     icon: <IconStatistics />,                                      href: "/statistics",    feature: "statistics" },
+    { label: "Visualizer",     icon: <IconVisualizer />,                                      href: "/visualizer",    feature: "visualizer" },
+    { label: "Backup & Restore", icon: <IconBackupRestore />,                                 href: "/backup-restore",feature: "backup-restore" },
+    { label: "VPS",            icon: <Server className="w-4 h-4" strokeWidth={1.5} />,        href: "/vps",           feature: "vps" },
+    { label: "AI Terminal",    icon: <Terminal className="w-4 h-4" strokeWidth={1.5} />,      href: "/terminal",      feature: "terminal" },
+    { label: "SSH",            icon: <PlugZap className="w-4 h-4" strokeWidth={1.5} />,       href: "/ssh",           feature: "ssh" },
+    { label: "Docker",         icon: <Container className="w-4 h-4" strokeWidth={1.5} />,     href: "/docker",        feature: "docker" },
+    { label: "Auto Deploy",    icon: <GitBranch className="w-4 h-4" strokeWidth={1.5} />,     href: "/deploy",        feature: "deploy" },
+    { label: "Reverse Proxy",  icon: <Globe className="w-4 h-4" strokeWidth={1.5} />,         href: "/proxy",         feature: "proxy" },
+    { label: "Domains",        icon: <ShieldCheck className="w-4 h-4" strokeWidth={1.5} />,   href: "/domains",       feature: "domains" },
+    { label: "Scheduler",      icon: <Clock className="w-4 h-4" strokeWidth={1.5} />,         href: "/scheduler",     feature: "scheduler" },
+    { label: "Storage",        icon: <Database className="w-4 h-4" strokeWidth={1.5} />,      href: "/storage",       feature: "storage" },
+    { label: "Redis Cache",    icon: <Zap className="w-4 h-4" strokeWidth={1.5} />,           href: "/redis",         feature: "redis" },
+    { label: "AI",             icon: <Sparkles className="w-4 h-4" strokeWidth={1.5} />,      href: "/ai",            feature: "ai" },
+    { label: "Docklet Agent",  icon: <Bot className="w-4 h-4" strokeWidth={1.5} />,           href: "/agent",         feature: "agent" },
 ];
+
+// Group separators: after indices 2, 4, 5, 15 (0-based)
+const SEPARATORS_AFTER = new Set([2, 4, 5, 15]);
 
 function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
     const [location] = useLocation();
@@ -142,38 +147,39 @@ function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
 }
 
 function SidebarNav({ onSelect }: { onSelect?: () => void }) {
+    const { hasFeature } = useAuth();
+    const visible = navItems.filter((item) => hasFeature(item.feature));
+
+    if (visible.length === 0) {
+        return (
+            <nav className="flex flex-col gap-0.5 p-3">
+                <p className="text-xs text-muted-foreground px-3 py-2">No features assigned.</p>
+            </nav>
+        );
+    }
+
+    // Render with separators only between group transitions
+    const elements: React.ReactNode[] = [];
+    let lastOriginalIndex = -1;
+
+    visible.forEach((item) => {
+        const originalIndex = navItems.indexOf(item);
+        // Insert separator if we've crossed a separator boundary
+        if (lastOriginalIndex >= 0) {
+            const needsSep = Array.from(SEPARATORS_AFTER).some(
+                (sep) => lastOriginalIndex <= sep && originalIndex > sep
+            );
+            if (needsSep) {
+                elements.push(<div key={`sep-${originalIndex}`} className="h-px bg-border/50 my-2 mx-2" />);
+            }
+        }
+        elements.push(<NavLink key={item.href} item={item} onSelect={onSelect} />);
+        lastOriginalIndex = originalIndex;
+    });
+
     return (
         <nav className="flex flex-col gap-0.5 p-3">
-            <NavLink item={navItems[0]} onSelect={onSelect} />
-            <NavLink item={navItems[1]} onSelect={onSelect} />
-            <NavLink item={navItems[2]} onSelect={onSelect} />
-
-            <div className="h-px bg-border/50 my-2 mx-2" />
-
-            <NavLink item={navItems[3]} onSelect={onSelect} />
-            <NavLink item={navItems[4]} onSelect={onSelect} />
-
-            <div className="h-px bg-border/50 my-2 mx-2" />
-
-            <NavLink item={navItems[5]} onSelect={onSelect} />
-
-            <div className="h-px bg-border/50 my-2 mx-2" />
-
-            <NavLink item={navItems[6]} onSelect={onSelect} />
-            <NavLink item={navItems[7]} onSelect={onSelect} />
-            <NavLink item={navItems[8]} onSelect={onSelect} />
-            <NavLink item={navItems[9]} onSelect={onSelect} />
-            <NavLink item={navItems[10]} onSelect={onSelect} />
-            <NavLink item={navItems[11]} onSelect={onSelect} />
-            <NavLink item={navItems[12]} onSelect={onSelect} />
-            <NavLink item={navItems[13]} onSelect={onSelect} />
-            <NavLink item={navItems[14]} onSelect={onSelect} />
-            <NavLink item={navItems[15]} onSelect={onSelect} />
-
-            <div className="h-px bg-border/50 my-2 mx-2" />
-
-            <NavLink item={navItems[16]} onSelect={onSelect} />
-            <NavLink item={navItems[17]} onSelect={onSelect} />
+            {elements}
         </nav>
     );
 }
@@ -188,7 +194,9 @@ function SidebarBrand() {
 
 function SidebarBottom({ onSelect }: { onSelect?: () => void }) {
     const [location] = useLocation();
+    const { user } = useAuth();
     const settingsActive = location === "/settings";
+    const usersActive = location === "/users";
 
     return (
         <div className="mt-auto border-t border-border/60">
@@ -208,6 +216,24 @@ function SidebarBottom({ onSelect }: { onSelect?: () => void }) {
                     </span>
                     Settings
                 </Link>
+
+                {user?.isAdmin && (
+                    <Link
+                        href="/users"
+                        onClick={() => onSelect?.()}
+                        className={cn(
+                            "flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left group cursor-pointer",
+                            usersActive
+                                ? "bg-muted text-foreground border border-border"
+                                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground border border-transparent"
+                        )}
+                    >
+                        <span className={cn("transition-colors shrink-0", usersActive ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")}>
+                            <Users className="w-4 h-4" />
+                        </span>
+                        Users
+                    </Link>
+                )}
             </div>
 
             <div className="px-3 pb-4">
@@ -216,8 +242,12 @@ function SidebarBottom({ onSelect }: { onSelect?: () => void }) {
                         <IconUser />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-foreground leading-none truncate">Admin</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5 leading-none font-mono truncate">Docklet</p>
+                        <p className="text-xs font-semibold text-foreground leading-none truncate capitalize">
+                            {user?.username ?? "—"}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5 leading-none font-mono truncate capitalize">
+                            {user?.role ?? "Docklet"}
+                        </p>
                     </div>
                     <button
                         onClick={() => {

@@ -7,13 +7,13 @@ import { generateToken, authenticateToken } from '../middleware/auth';
 import { loadConfig } from '../lib/config';
 import { getSetting, setSetting, deleteSetting } from '../lib/settings';
 import { getJwtSecret } from '../lib/secret';
+import { getUserByUsername, verifyUserPassword } from '../lib/usersDb';
 
 const router = express.Router();
 const JWT_SECRET = getJwtSecret();
 const ENABLE_2FA = process.env.ENABLE_2FA === 'true';
 const APP_NAME = 'Docklet';
 
-// Prevent any browser or proxy from caching auth responses
 router.use((_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     next();
@@ -88,21 +88,60 @@ router.post('/login', async (req, res) => {
     const inputUser = (username || '').toString().trim();
     const inputPass = (password || '').toString().trim();
 
-    if (inputUser !== envUser || inputPass !== envPass) {
+    // ── Admin (env-var) path ──────────────────────────────────────────────────
+    if (inputUser === envUser && inputPass === envPass) {
+        if (ENABLE_2FA) {
+            const twoFaEnabled = await getSetting('twofa_enabled');
+            if (twoFaEnabled === 'true') {
+                const otpToken = generatePartialToken(inputUser);
+                return res.json({ requiresOTP: true, otpToken });
+            }
+        }
+        const token = generateToken({
+            username: inputUser,
+            role: 'admin',
+            isAdmin: true,
+        });
+        return res.json({
+            token,
+            user: { username: inputUser, role: 'admin', isAdmin: true },
+        });
+    }
+
+    // ── App-user (DB) path ────────────────────────────────────────────────────
+    try {
+        const dbUser = await getUserByUsername(inputUser);
+        if (!dbUser) {
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
+        if (!dbUser.enabled) {
+            return res.status(403).json({ message: 'Account disabled. Contact your administrator.' });
+        }
+        const ok = await verifyUserPassword(dbUser, inputPass);
+        if (!ok) {
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
+        const token = generateToken({
+            id: dbUser.id,
+            username: dbUser.username,
+            role: dbUser.role,
+            features: dbUser.features,
+            isAdmin: false,
+        });
+        return res.json({
+            token,
+            user: {
+                id: dbUser.id,
+                username: dbUser.username,
+                role: dbUser.role,
+                features: dbUser.features,
+                isAdmin: false,
+            },
+        });
+    } catch (err: any) {
+        console.error('[Auth] DB login error:', err.message);
         return res.status(401).json({ message: 'Invalid credentials' });
     }
-
-    // If 2FA is globally enabled and this admin has configured it, require OTP
-    if (ENABLE_2FA) {
-        const twoFaEnabled = await getSetting('twofa_enabled');
-        if (twoFaEnabled === 'true') {
-            const otpToken = generatePartialToken(inputUser);
-            return res.json({ requiresOTP: true, otpToken });
-        }
-    }
-
-    const token = generateToken({ username: inputUser });
-    return res.json({ token, user: { username: inputUser } });
 });
 
 // ── OTP login verification ────────────────────────────────────────────────────
@@ -123,8 +162,15 @@ router.post('/2fa/verify-login', otpLimiter, async (req, res) => {
         return res.status(401).json({ message: 'Invalid code — check your authenticator app' });
     }
 
-    const token = generateToken({ username: partial.username });
-    return res.json({ token, user: { username: partial.username } });
+    const token = generateToken({
+        username: partial.username,
+        role: 'admin',
+        isAdmin: true,
+    });
+    return res.json({
+        token,
+        user: { username: partial.username, role: 'admin', isAdmin: true },
+    });
 });
 
 // ── 2FA status ────────────────────────────────────────────────────────────────
