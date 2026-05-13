@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/hooks/use-auth";
 import { ALL_FEATURES, FEATURE_GROUPS } from "@/lib/features";
+import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
+import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,10 +34,11 @@ import {
   Trash2,
   ToggleLeft,
   ToggleRight,
-  ShieldCheck,
   UserX,
   Eye,
   EyeOff,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -90,19 +93,11 @@ function FeatureSelector({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={selectAll}
-          className="text-xs text-primary hover:underline"
-        >
+        <button type="button" onClick={selectAll} className="text-xs text-primary hover:underline">
           Select all
         </button>
         <span className="text-xs text-muted-foreground">·</span>
-        <button
-          type="button"
-          onClick={clearAll}
-          className="text-xs text-muted-foreground hover:text-foreground hover:underline"
-        >
+        <button type="button" onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground hover:underline">
           Clear all
         </button>
         <span className="ml-auto text-xs text-muted-foreground">
@@ -200,22 +195,11 @@ function UserDialog({
   const mutation = useMutation({
     mutationFn: async (data: UserFormData) => {
       if (editing) {
-        const body: any = {
-          username: data.username,
-          role: data.role,
-          features: data.features,
-        };
+        const body: any = { username: data.username, role: data.role, features: data.features };
         if (data.password) body.password = data.password;
-        return apiFetch(`/users/${editing.id}`, {
-          method: "PUT",
-          body: JSON.stringify(body),
-        });
-      } else {
-        return apiFetch("/users", {
-          method: "POST",
-          body: JSON.stringify(data),
-        });
+        return apiFetch(`/users/${editing.id}`, { method: "PUT", body: JSON.stringify(body) });
       }
+      return apiFetch("/users", { method: "POST", body: JSON.stringify(data) });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
@@ -292,9 +276,7 @@ function UserDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={mutation.isPending}>
               {mutation.isPending ? "Saving…" : editing ? "Save Changes" : "Create User"}
             </Button>
@@ -308,6 +290,7 @@ function UserDialog({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
+  const { theme, toggle } = useTheme();
   const { user: me } = useAuth();
   const qc = useQueryClient();
   const { data, isLoading } = useUsers();
@@ -316,15 +299,13 @@ export default function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
 
   const toggleMutation = useMutation({
-    mutationFn: (id: number) =>
-      apiFetch(`/users/${id}/toggle`, { method: "PATCH" }),
+    mutationFn: (id: number) => apiFetch(`/users/${id}/toggle`, { method: "PATCH" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
     onError: (err: any) => toast.error(err.message),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) =>
-      apiFetch(`/users/${id}`, { method: "DELETE" }),
+    mutationFn: (id: number) => apiFetch(`/users/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       toast.success("User deleted");
@@ -333,147 +314,167 @@ export default function UsersPage() {
     onError: (err: any) => toast.error(err.message),
   });
 
-  if (!me?.isAdmin) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-muted-foreground">
-        <ShieldCheck className="w-10 h-10" />
-        <p className="font-medium">Admin access required</p>
-      </div>
-    );
-  }
-
   const users: AppUser[] = data?.users ?? [];
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-primary/10 border border-border flex items-center justify-center">
-            <Users className="w-4 h-4 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-foreground">User Management</h1>
-            <p className="text-xs text-muted-foreground">
-              Create users with custom roles and feature permissions
-            </p>
-          </div>
-        </div>
-        <Button
-          onClick={() => { setEditing(null); setDialogOpen(true); }}
-          size="sm"
-          className="gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          New User
-        </Button>
-      </div>
+    <div className="min-h-screen bg-background text-foreground flex">
+      <DesktopSidebar />
+      <div className="flex-1 flex flex-col min-w-0">
 
-      {/* Table */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        {isLoading ? (
-          <div className="p-12 text-center text-muted-foreground text-sm">Loading users…</div>
-        ) : users.length === 0 ? (
-          <div className="p-12 text-center space-y-2">
-            <UserX className="w-8 h-8 text-muted-foreground mx-auto" />
-            <p className="text-sm text-muted-foreground">No users yet. Create one to get started.</p>
+        {/* Header — identical pattern to every other page */}
+        <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
+          <div className="px-4 h-18 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <MobileSidebarTrigger />
+              <div className="hidden lg:flex items-center gap-3">
+                <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">
+                  <Users className="w-4 h-4 text-primary" />
+                </div>
+                <span className="font-medium text-sm tracking-tight text-foreground">User Management</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                onClick={toggle}
+              >
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
+            </div>
           </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">User</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Role</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Features</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Status</th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {users.map((u) => (
-                <tr key={u.id} className="hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-foreground">{u.username}</div>
-                    <div className="text-xs text-muted-foreground font-mono">
-                      #{u.id} · {new Date(u.created_at).toLocaleDateString()}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant="outline" className="text-xs font-mono capitalize">
-                      {u.role}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1 max-w-xs">
-                      {u.features.length === 0 ? (
-                        <span className="text-xs text-muted-foreground italic">None</span>
-                      ) : u.features.length <= 4 ? (
-                        u.features.map((f) => (
-                          <Badge key={f} variant="secondary" className="text-[10px] px-1.5 py-0">
-                            {ALL_FEATURES.find((x) => x.key === f)?.label ?? f}
-                          </Badge>
-                        ))
-                      ) : (
-                        <>
-                          {u.features.slice(0, 3).map((f) => (
-                            <Badge key={f} variant="secondary" className="text-[10px] px-1.5 py-0">
-                              {ALL_FEATURES.find((x) => x.key === f)?.label ?? f}
-                            </Badge>
-                          ))}
-                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                            +{u.features.length - 3} more
-                          </Badge>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => toggleMutation.mutate(u.id)}
-                      disabled={toggleMutation.isPending}
-                      className="flex items-center gap-1.5 text-xs font-medium transition-colors"
-                      title={u.enabled ? "Click to disable" : "Click to enable"}
-                    >
-                      {u.enabled ? (
-                        <>
-                          <ToggleRight className="w-4 h-4 text-emerald-500" />
-                          <span className="text-emerald-600 dark:text-emerald-400">Active</span>
-                        </>
-                      ) : (
-                        <>
-                          <ToggleLeft className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">Disabled</span>
-                        </>
-                      )}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        onClick={() => { setEditing(u); setDialogOpen(true); }}
-                        title="Edit user"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-red-500"
-                        onClick={() => setDeleteTarget(u)}
-                        title="Delete user"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        </header>
+
+        {/* Main content */}
+        <main className="flex-1 px-4 py-8 space-y-8 pb-24 max-w-6xl w-full mx-auto">
+
+          {/* Page title */}
+          <div className="flex items-end justify-between gap-4">
+            <div className="flex flex-col gap-2">
+              <h1 className="text-4xl sm:text-5xl font-normal tracking-tight text-foreground leading-none">
+                User Management
+              </h1>
+              <p className="text-muted-foreground text-sm max-w-xl leading-relaxed">
+                Create users with custom roles and feature-level access permissions.
+              </p>
+            </div>
+            <Button
+              onClick={() => { setEditing(null); setDialogOpen(true); }}
+              className="gap-2 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              New User
+            </Button>
+          </div>
+
+          {/* Users table */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            {isLoading ? (
+              <div className="p-12 text-center text-muted-foreground text-sm">Loading users…</div>
+            ) : users.length === 0 ? (
+              <div className="p-12 text-center space-y-2">
+                <UserX className="w-8 h-8 text-muted-foreground mx-auto" />
+                <p className="text-sm text-muted-foreground">No users yet. Create one to get started.</p>
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">User</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Role</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Features</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Status</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {users.map((u) => (
+                    <tr key={u.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{u.username}</div>
+                        <div className="text-xs text-muted-foreground font-mono">
+                          #{u.id} · {new Date(u.created_at).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className="text-xs font-mono capitalize">
+                          {u.role}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1 max-w-xs">
+                          {u.features.length === 0 ? (
+                            <span className="text-xs text-muted-foreground italic">None</span>
+                          ) : u.features.length <= 4 ? (
+                            u.features.map((f) => (
+                              <Badge key={f} variant="secondary" className="text-[10px] px-1.5 py-0">
+                                {ALL_FEATURES.find((x) => x.key === f)?.label ?? f}
+                              </Badge>
+                            ))
+                          ) : (
+                            <>
+                              {u.features.slice(0, 3).map((f) => (
+                                <Badge key={f} variant="secondary" className="text-[10px] px-1.5 py-0">
+                                  {ALL_FEATURES.find((x) => x.key === f)?.label ?? f}
+                                </Badge>
+                              ))}
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                +{u.features.length - 3} more
+                              </Badge>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => toggleMutation.mutate(u.id)}
+                          disabled={toggleMutation.isPending}
+                          className="flex items-center gap-1.5 text-xs font-medium transition-colors"
+                          title={u.enabled ? "Click to disable" : "Click to enable"}
+                        >
+                          {u.enabled ? (
+                            <>
+                              <ToggleRight className="w-4 h-4 text-emerald-500" />
+                              <span className="text-emerald-600 dark:text-emerald-400">Active</span>
+                            </>
+                          ) : (
+                            <>
+                              <ToggleLeft className="w-4 h-4 text-muted-foreground" />
+                              <span className="text-muted-foreground">Disabled</span>
+                            </>
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => { setEditing(u); setDialogOpen(true); }}
+                            title="Edit user"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-red-500"
+                            onClick={() => setDeleteTarget(u)}
+                            title="Delete user"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </main>
       </div>
 
       {/* Create / Edit dialog */}
