@@ -297,26 +297,26 @@ export default function TerminalPage() {
 
           {/* ── Terminal Window ─────────────────────────────────────── */}
           <div
-            className="flex-1 overflow-hidden border-b flex flex-col cursor-text border-[#252525] bg-[#0d0d0d]"
+            className="flex-1 overflow-hidden border-b flex flex-col cursor-text border-[#e0e0e0] dark:border-[#252525] bg-[#f8f8f8] dark:bg-[#0d0d0d]"
             onClick={focusTerminal}
           >
             {/* Title bar */}
-            <div className="flex items-center justify-between px-4 py-2.5 border-b shrink-0 bg-[#181818] border-[#252525]">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b shrink-0 bg-[#efefef] dark:bg-[#181818] border-[#e0e0e0] dark:border-[#252525]">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#ff5f57] border border-[#e0443e]" />
                 <span className="w-3 h-3 rounded-full bg-[#febc2e] border border-[#d4a012]" />
                 <span className="w-3 h-3 rounded-full bg-[#28c840] border border-[#14ae2c]" />
               </div>
               <div className="flex items-center gap-1.5">
-                <TerminalIcon className="w-3 h-3 text-[#555]" />
-                <span className="text-[11px] font-mono select-none text-[#555]">
+                <TerminalIcon className="w-3 h-3 text-[#aaa] dark:text-[#555]" />
+                <span className="text-[11px] font-mono select-none text-[#aaa] dark:text-[#555]">
                   docklet — bash
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Button
                   variant="ghost" size="sm"
-                  className="h-6 px-2 text-[10px] text-[#555] hover:text-[#999] hover:bg-[#222] rounded gap-1"
+                  className="h-6 px-2 text-[10px] text-[#aaa] dark:text-[#555] hover:text-[#555] dark:hover:text-[#999] hover:bg-[#e0e0e0] dark:hover:bg-[#222] rounded gap-1"
                   onClick={e => { e.stopPropagation(); handleClearHistory(); }}
                 >
                   <Trash2 className="w-3 h-3" /> Clear
@@ -331,25 +331,25 @@ export default function TerminalPage() {
             >
               {logs.length === 0 && (
                 <div className="mb-3 space-y-0.5">
-                  <div className="text-[#3a3a3a] text-[11px] select-none">────────────────────────────────────</div>
-                  <div className="text-[#4ade80]/70">Docklet AI Terminal v1.0</div>
-                  <div className="text-[#444]">Connected · type a command or generate one with AI below</div>
-                  <div className="text-[#3a3a3a] text-[11px] select-none mt-1">────────────────────────────────────</div>
+                  <div className="text-[#ccc] dark:text-[#3a3a3a] text-[11px] select-none">────────────────────────────────────</div>
+                  <div className="text-[#16a34a]/80 dark:text-[#4ade80]/70">Docklet AI Terminal v1.0</div>
+                  <div className="text-[#888] dark:text-[#444]">Connected · type a command or generate one with AI below</div>
+                  <div className="text-[#ccc] dark:text-[#3a3a3a] text-[11px] select-none mt-1">────────────────────────────────────</div>
                 </div>
               )}
               {logs.map((line, i) => (
                 <div key={i} className={
-                  line.stream === "input"  ? "text-[#67e8f9] font-semibold" :
-                  line.stream === "stderr" ? "text-[#f87171]" :
-                  line.stream === "system" ? "text-[#555] text-[11px]" :
-                  "text-[#86efac]"
+                  line.stream === "input"  ? "text-[#0369a1] dark:text-[#67e8f9] font-semibold" :
+                  line.stream === "stderr" ? "text-[#dc2626] dark:text-[#f87171]" :
+                  line.stream === "system" ? "text-[#999] dark:text-[#555] text-[11px]" :
+                  "text-[#166534] dark:text-[#86efac]"
                 }>
                   {line.text}
                 </div>
               ))}
               {running && (
-                <div className="flex items-center gap-1.5 text-[#444] text-[11px] mt-0.5">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#4ade80] animate-pulse" />
+                <div className="flex items-center gap-1.5 text-[#aaa] dark:text-[#444] text-[11px] mt-0.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#16a34a] dark:bg-[#4ade80] animate-pulse" />
                   executing…
                 </div>
               )}
@@ -359,16 +359,16 @@ export default function TerminalPage() {
                 <div className="relative">
                   {/* Autocomplete dropdown */}
                   {acVisible && acMatches.length > 0 && (
-                    <div className="absolute bottom-full left-0 mb-1 w-72 rounded-lg border border-[#2a2a2a] bg-[#111] shadow-xl overflow-hidden z-50">
-                      <div className="px-3 py-1.5 border-b border-[#1f1f1f] flex items-center justify-between">
-                        <span className="text-[10px] text-[#555] uppercase tracking-wider font-medium">Suggestions</span>
-                        <span className="text-[10px] text-[#444]">↑↓ navigate · Tab select · Esc close</span>
+                    <div className="absolute bottom-full left-0 mb-1 w-72 rounded-lg border border-[#e0e0e0] dark:border-[#2a2a2a] bg-white dark:bg-[#111] shadow-xl overflow-hidden z-50">
+                      <div className="px-3 py-1.5 border-b border-[#ececec] dark:border-[#1f1f1f] flex items-center justify-between">
+                        <span className="text-[10px] text-[#999] dark:text-[#555] uppercase tracking-wider font-medium">Suggestions</span>
+                        <span className="text-[10px] text-[#bbb] dark:text-[#444]">↑↓ navigate · Tab select · Esc close</span>
                       </div>
                       {acMatches.map((s, i) => (
                         <button
                           key={s.cmd}
                           className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
-                            i === acIndex ? "bg-[#1a1a1a]" : "hover:bg-[#161616]"
+                            i === acIndex ? "bg-[#f0f0f0] dark:bg-[#1a1a1a]" : "hover:bg-[#f8f8f8] dark:hover:bg-[#161616]"
                           }`}
                           onMouseDown={e => {
                             e.preventDefault();
@@ -378,12 +378,12 @@ export default function TerminalPage() {
                           }}
                           onMouseEnter={() => setAcIndex(i)}
                         >
-                          <code className={`font-mono text-[12px] w-20 shrink-0 ${i === acIndex ? "text-primary" : "text-[#86efac]"}`}>
+                          <code className={`font-mono text-[12px] w-20 shrink-0 ${i === acIndex ? "text-primary" : "text-[#166534] dark:text-[#86efac]"}`}>
                             {s.cmd}
                           </code>
-                          <span className="text-[11px] text-[#555] truncate">{s.desc}</span>
+                          <span className="text-[11px] text-[#999] dark:text-[#555] truncate">{s.desc}</span>
                           {i === acIndex && (
-                            <span className="ml-auto shrink-0 text-[10px] text-[#333] font-mono">Tab</span>
+                            <span className="ml-auto shrink-0 text-[10px] text-[#ccc] dark:text-[#333] font-mono">Tab</span>
                           )}
                         </button>
                       ))}
@@ -392,13 +392,13 @@ export default function TerminalPage() {
 
                   {/* $ prompt line */}
                   <div className="flex items-center gap-0 mt-0.5" onClick={e => e.stopPropagation()}>
-                    <span className="mr-2 select-none font-mono text-xs text-[#555]">
+                    <span className="mr-2 select-none font-mono text-xs text-[#aaa] dark:text-[#555]">
                       {cwd.replace(/^\/root(\/|$)/, "~$1").replace(/^\/home\/[^/]+/, "~")}
                     </span>
-                    <span className="mr-2 select-none font-bold text-[#555]">$</span>
-                    <span className="text-[#e5e5e5] whitespace-pre">{command}</span>
+                    <span className="mr-2 select-none font-bold text-[#bbb] dark:text-[#555]">$</span>
+                    <span className="text-[#111] dark:text-[#e5e5e5] whitespace-pre">{command}</span>
                     <span
-                      className={`inline-block w-[8px] h-[14px] bg-[#e5e5e5] ml-px align-middle ${
+                      className={`inline-block w-[8px] h-[14px] bg-[#333] dark:bg-[#e5e5e5] ml-px align-middle ${
                         termFocused ? "animate-[blink_1s_step-end_infinite]" : "opacity-20"
                       }`}
                       style={{ verticalAlign: "middle", marginTop: 1 }}
