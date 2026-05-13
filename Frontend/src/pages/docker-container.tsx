@@ -598,9 +598,11 @@ function TerminalTab({ container }: { container: DockerContainer }) {
     if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
   }, [lines]);
 
-  function sendInput(e: React.FormEvent) {
-    e.preventDefault();
+  function sendInput(e?: { preventDefault?: () => void }) {
+    e?.preventDefault?.();
     if (!connected) return;
+    const cmd = input.trim();
+    if (cmd === "clear") { setLines([]); setInput(""); return; }
     socket.emit("docker:exec:input", input + "\n");
     setInput("");
   }
@@ -672,7 +674,7 @@ function TerminalTab({ container }: { container: DockerContainer }) {
           </div>
         </div>
 
-        {/* Output */}
+        {/* Output + inline input */}
         <div
           ref={outputRef}
           className="flex-1 overflow-y-auto p-4 font-mono text-[13px] leading-relaxed cursor-text bg-[#f8f8f8] dark:bg-[#0d0d0d]"
@@ -687,34 +689,31 @@ function TerminalTab({ container }: { container: DockerContainer }) {
             </div>
           )}
           {error && <div className="text-[#dc2626] dark:text-[#f87171] text-xs">{error}</div>}
-        </div>
 
-        {/* Input */}
-        <form onSubmit={sendInput} className="shrink-0 border-t flex items-center px-3 py-2 gap-2 bg-[#efefef] dark:bg-[#181818] border-[#e0e0e0] dark:border-[#252525]">
-          <span className="font-mono text-xs text-[#16a34a] dark:text-[#4ade80] shrink-0">$</span>
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "c" && e.ctrlKey) { socket.emit("docker:exec:input", "\x03"); setInput(""); e.preventDefault(); }
-              if (e.key === "l" && e.ctrlKey) { setLines([]); e.preventDefault(); }
-            }}
-            className="flex-1 bg-transparent font-mono text-xs text-[#111] dark:text-[#e5e5e5] outline-none placeholder:text-[#aaa] dark:placeholder:text-[#555]"
-            placeholder={connected ? "Type a command…" : "Waiting for connection…"}
-            disabled={!connected}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Button type="submit" size="sm" variant="ghost" className="h-6 w-6 p-0 text-[#aaa] dark:text-[#555]" disabled={!connected || !input.trim()}>
-            <Play className="w-3 h-3" />
-          </Button>
-        </form>
-
-        {/* Hints */}
-        <div className="shrink-0 px-4 py-2 border-t flex gap-4 text-[10px] text-[#aaa] dark:text-[#555] bg-[#f8f8f8] dark:bg-[#0d0d0d] border-[#e0e0e0] dark:border-[#252525]">
-          <span><kbd className="font-mono bg-[#e0e0e0] dark:bg-[#222] text-[#555] dark:text-[#999] px-1 rounded">Ctrl+C</kbd> interrupt</span>
-          <span><kbd className="font-mono bg-[#e0e0e0] dark:bg-[#222] text-[#555] dark:text-[#999] px-1 rounded">Ctrl+L</kbd> clear</span>
+          {/* Inline prompt */}
+          {connected && (
+            <div className="flex items-center mt-0.5" onClick={e => { e.stopPropagation(); inputRef.current?.focus(); }}>
+              <span className="mr-2 select-none text-[#16a34a] dark:text-[#4ade80]">$</span>
+              <span className="text-[#111] dark:text-[#e5e5e5] whitespace-pre">{input}</span>
+              <span className="inline-block w-[7px] h-[14px] bg-[#333] dark:bg-[#e5e5e5] ml-px animate-[blink_1s_step-end_infinite]" style={{ verticalAlign: "middle" }} />
+              {/* Hidden real input */}
+              <input
+                ref={inputRef}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") { sendInput(e as any); return; }
+                  if (e.key === "c" && e.ctrlKey) { socket.emit("docker:exec:input", "\x03"); setInput(""); e.preventDefault(); }
+                  if (e.key === "l" && e.ctrlKey) { setLines([]); e.preventDefault(); }
+                }}
+                className="sr-only"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
