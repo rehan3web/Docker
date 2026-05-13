@@ -98,6 +98,7 @@ type NavItem = {
     icon: React.ReactNode;
     href: string;
     feature: string;
+    adminOnly?: boolean;
 };
 
 const navItems: NavItem[] = [
@@ -116,13 +117,14 @@ const navItems: NavItem[] = [
     { label: "Domains",        icon: <ShieldCheck className="w-4 h-4" strokeWidth={1.5} />,   href: "/domains",       feature: "domains" },
     { label: "Scheduler",      icon: <Clock className="w-4 h-4" strokeWidth={1.5} />,         href: "/scheduler",     feature: "scheduler" },
     { label: "Storage",        icon: <Database className="w-4 h-4" strokeWidth={1.5} />,      href: "/storage",       feature: "storage" },
+    { label: "Users",          icon: <Users className="w-4 h-4" strokeWidth={1.5} />,         href: "/users",         feature: "users",    adminOnly: true },
     { label: "Redis Cache",    icon: <Zap className="w-4 h-4" strokeWidth={1.5} />,           href: "/redis",         feature: "redis" },
     { label: "AI",             icon: <Sparkles className="w-4 h-4" strokeWidth={1.5} />,      href: "/ai",            feature: "ai" },
     { label: "Docklet Agent",  icon: <Bot className="w-4 h-4" strokeWidth={1.5} />,           href: "/agent",         feature: "agent" },
 ];
 
-// Group separators: after indices 2, 4, 5, 15 (0-based)
-const SEPARATORS_AFTER = new Set([2, 4, 5, 15]);
+// Group separators: after indices 2, 4, 5, 16 (0-based) — Users at 15, Redis at 16
+const SEPARATORS_AFTER = new Set([2, 4, 5, 16]);
 
 function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
     const [location] = useLocation();
@@ -147,8 +149,10 @@ function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
 }
 
 function SidebarNav({ onSelect }: { onSelect?: () => void }) {
-    const { hasFeature } = useAuth();
-    const visible = navItems.filter((item) => hasFeature(item.feature));
+    const { hasFeature, user } = useAuth();
+    const visible = navItems.filter((item) =>
+        item.adminOnly ? user?.isAdmin : hasFeature(item.feature)
+    );
 
     if (visible.length === 0) {
         return (
@@ -194,9 +198,7 @@ function SidebarBrand() {
 
 function SidebarBottom({ onSelect }: { onSelect?: () => void }) {
     const [location] = useLocation();
-    const { user } = useAuth();
     const settingsActive = location === "/settings";
-    const usersActive = location === "/users";
 
     return (
         <div className="mt-auto border-t border-border/60">
@@ -216,24 +218,6 @@ function SidebarBottom({ onSelect }: { onSelect?: () => void }) {
                     </span>
                     Settings
                 </Link>
-
-                {user?.isAdmin && (
-                    <Link
-                        href="/users"
-                        onClick={() => onSelect?.()}
-                        className={cn(
-                            "flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left group cursor-pointer",
-                            usersActive
-                                ? "bg-muted text-foreground border border-border"
-                                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground border border-transparent"
-                        )}
-                    >
-                        <span className={cn("transition-colors shrink-0", usersActive ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")}>
-                            <Users className="w-4 h-4" />
-                        </span>
-                        Users
-                    </Link>
-                )}
             </div>
 
             <div className="px-3 pb-4">
