@@ -14,7 +14,7 @@ import { toast } from "sonner";
 const prismStyles = `
   .code-editor-pre,
   .code-editor-textarea {
-    font-family: 'Source Code Pro', Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace !important;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
     font-size: 14px !important;
     line-height: 24px !important;
     padding: 16px !important;
