@@ -274,26 +274,15 @@ function ActionTab({ container, onRefresh }: { container: DockerContainer; onRef
                   {isPublic ? "Ports are accessible from outside the host" : "Ports are bound to localhost only"}
                 </p>
               </div>
-              <div className="flex gap-2 shrink-0">
-                <Button
-                  size="sm"
-                  variant={isPublic ? "default" : "outline"}
-                  className="h-8 text-xs gap-1.5"
-                  disabled={!!busy}
-                  onClick={() => doRebind(false)}
-                >
-                  <Globe className="w-3.5 h-3.5" />Private
-                </Button>
-                <Button
-                  size="sm"
-                  variant={!isPublic ? "default" : "outline"}
-                  className="h-8 text-xs gap-1.5"
-                  disabled={!!busy}
-                  onClick={() => doRebind(true)}
-                >
-                  <Globe className="w-3.5 h-3.5" />Public
-                </Button>
-              </div>
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => doRebind(!isPublic)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${isPublic ? "bg-primary" : "bg-muted"}`}
+                title={isPublic ? "Switch to Private" : "Switch to Public"}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${isPublic ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
             </div>
           </div>
         );
