@@ -198,6 +198,7 @@ function SidebarBrand() {
 
 function SidebarBottom({ onSelect }: { onSelect?: () => void }) {
     const [location] = useLocation();
+    const { user } = useAuth();
     const settingsActive = location === "/settings";
 
     return (

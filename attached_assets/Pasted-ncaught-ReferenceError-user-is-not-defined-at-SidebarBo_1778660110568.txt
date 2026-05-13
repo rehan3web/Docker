@@ -1,0 +1,34 @@
+ncaught ReferenceError: user is not defined
+    at SidebarBottom (AppSidebar.tsx:230:30)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=eaecc4f0:11548:26)
+    at mountIndeterminateComponent (chunk-RPCDYKBN.js?v=eaecc4f0:14926:21)
+    at beginWork (chunk-RPCDYKBN.js?v=eaecc4f0:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=eaecc4f0:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=eaecc4f0:3699:24)
+    at invokeGuardedCallback (chunk-RPCDYKBN.js?v=eaecc4f0:3733:39)
+    at beginWork$1 (chunk-RPCDYKBN.js?v=eaecc4f0:19765:15)
+    at performUnitOfWork (chunk-RPCDYKBN.js?v=eaecc4f0:19198:20)
+    at workLoopSync (chunk-RPCDYKBN.js?v=eaecc4f0:19137:13)Understand this error
+chunk-RPCDYKBN.js?v=eaecc4f0:14032 The above error occurred in the <SidebarBottom> component:
+
+    at SidebarBottom (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/src/components/AppSidebar.tsx?t=1778660066522:371:26)
+    at aside
+    at DesktopSidebar
+    at div
+    at VpsPage (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/src/pages/vps.tsx?t=1778660066522:54:29)
+    at FeatureRoute (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/src/App.tsx?t=1778660066522:173:14)
+    at Route (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/node_modules/.vite/deps/wouter.js?v=eaecc4f0:226:16)
+    at Switch (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/node_modules/.vite/deps/wouter.js?v=eaecc4f0:283:17)
+    at Router
+    at Router (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/node_modules/.vite/deps/wouter.js?v=eaecc4f0:180:17)
+    at Provider (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/node_modules/.vite/deps/chunk-CIWSPAEX.js?v=eaecc4f0:44:15)
+    at TooltipProvider (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=eaecc4f0:157:5)
+    at QueryClientProvider (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/node_modules/.vite/deps/@tanstack_react-query.js?v=eaecc4f0:3194:3)
+    at ThemeProvider (https://bda6cc1d-5bfd-4551-9c97-8b8193c600b5-00-3kig40xqgfk2v.pike.replit.dev/src/hooks/use-theme.tsx:24:33)
+    at App
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+logCapturedError @ chunk-RPCDYKBN.js?v=eaecc4f0:14032Understand this error
+chunk-RPCDYKBN.js?v=eaecc4f0:19413 Uncaught ReferenceError: user is not defined
+    at SidebarBottom (AppSidebar.tsx:230:30)
