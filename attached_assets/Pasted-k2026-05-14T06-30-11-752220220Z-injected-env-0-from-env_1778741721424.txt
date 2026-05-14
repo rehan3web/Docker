@@ -1,0 +1,114 @@
+k2026-05-14T06:30:11.752220220Z ◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+o2026-05-14T06:30:12.757717717Z ◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+<2026-05-14T06:30:12.780849585Z Backend running on port 3001
+T2026-05-14T06:30:12.821683805Z [BuildQueue] in-memory queue (max 2 parallel builds)
+B2026-05-14T06:30:12.963451976Z [Redis] Connected to docklet-redis
+h2026-05-14T06:30:12.974441869Z [InfraDB] Init error: password authentication failed for user "postgres"
+k2026-05-14T06:30:12.974478723Z [MemoryDB] Init warning: password authentication failed for user "postgres"
+j2026-05-14T06:30:12.974482936Z [Scheduler] Init error: password authentication failed for user "postgres"
+l2026-05-14T06:30:12.974486417Z [Users] Table init error: password authentication failed for user "postgres"
+j2026-05-14T06:30:12.974489794Z [AgentDB] Init warning: password authentication failed for user "postgres"
+o2026-05-14T06:30:12.976955003Z [ContainerMgmt] Init failed: password authentication failed for user "postgres"
+Y2026-05-14T06:30:12.982191713Z error: password authentication failed for user "postgres"
+W2026-05-14T06:30:12.982231979Z     at /usr/src/app/node_modules/pg-pool/index.js:45:11
+q2026-05-14T06:30:12.982238568Z     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+a2026-05-14T06:30:12.982240684Z     at async executeSysQuery (/usr/src/app/dist/lib/db.js:123:28)
+h2026-05-14T06:30:12.982242752Z     at async ensureInfraDbExists (/usr/src/app/dist/lib/infraDb.js:12:9)
+g2026-05-14T06:30:12.982244751Z     at async getInfraConnection (/usr/src/app/dist/lib/infraDb.js:94:5)
+h2026-05-14T06:30:12.982247107Z     at async executeInfraQuery (/usr/src/app/dist/lib/infraDb.js:110:15)
+W2026-05-14T06:30:12.982249044Z     at async /usr/src/app/dist/routes/storage.js:24:5 {
+.2026-05-14T06:30:12.982250983Z   length: 104,
+42026-05-14T06:30:12.982252821Z   severity: 'FATAL',
+02026-05-14T06:30:12.982254636Z   code: '28P01',
+42026-05-14T06:30:12.982256379Z   detail: undefined,
+22026-05-14T06:30:12.982258189Z   hint: undefined,
+62026-05-14T06:30:12.982259964Z   position: undefined,
+>2026-05-14T06:30:12.982261741Z   internalPosition: undefined,
+;2026-05-14T06:30:12.982263526Z   internalQuery: undefined,
+32026-05-14T06:30:12.982265367Z   where: undefined,
+42026-05-14T06:30:12.982267159Z   schema: undefined,
+32026-05-14T06:30:12.982268934Z   table: undefined,
+42026-05-14T06:30:12.982270691Z   column: undefined,
+62026-05-14T06:30:12.982272495Z   dataType: undefined,
+82026-05-14T06:30:12.982274285Z   constraint: undefined,
+12026-05-14T06:30:12.982276080Z   file: 'auth.c',
+.2026-05-14T06:30:12.982278021Z   line: '334',
+82026-05-14T06:30:12.982280031Z   routine: 'auth_failed'
+!2026-05-14T06:30:12.982325784Z }
+72026-05-14T06:46:24.592712494Z Database Query Error: {
+/2026-05-14T06:46:24.592736506Z   query: '\n' +
+�2026-05-14T06:46:24.592739844Z     '            SELECT pg_size_pretty(pg_database_size(current_database())) as size_pretty\n' +
+/2026-05-14T06:46:24.592742791Z     '        ',
+-2026-05-14T06:46:24.592745438Z   params: [],
+e2026-05-14T06:46:24.592748054Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:24.592750923Z   detail: undefined
+!2026-05-14T06:46:24.592753473Z }
+S2026-05-14T06:46:37.171998474Z Client connected: HDf4wqY7-HFA1DGNAAAD (user=admin)
+72026-05-14T06:46:39.618636590Z Database Query Error: {
+/2026-05-14T06:46:39.618653867Z   query: '\n' +
+�2026-05-14T06:46:39.618657017Z     '            SELECT pg_size_pretty(pg_database_size(current_database())) as size_pretty\n' +
+/2026-05-14T06:46:39.618660124Z     '        ',
+-2026-05-14T06:46:39.618662712Z   params: [],
+e2026-05-14T06:46:39.618665418Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:39.618668307Z   detail: undefined
+!2026-05-14T06:46:39.618670892Z }
+72026-05-14T06:46:39.620194756Z Database Query Error: {
+/2026-05-14T06:46:39.620204763Z   query: '\n' +
+H2026-05-14T06:46:39.620207493Z     '            SELECT table_name \n' +
+U2026-05-14T06:46:39.620210254Z     '            FROM information_schema.tables \n' +
+T2026-05-14T06:46:39.620212848Z     "            WHERE table_schema = 'public' \n" +
+I2026-05-14T06:46:39.620215585Z     '            ORDER BY table_name\n' +
+/2026-05-14T06:46:39.620218292Z     '        ',
+-2026-05-14T06:46:39.620221106Z   params: [],
+e2026-05-14T06:46:39.620223967Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:39.620226782Z   detail: undefined
+!2026-05-14T06:46:39.620229311Z }
+72026-05-14T06:46:39.621186882Z Database Query Error: {
+x2026-05-14T06:46:39.621202530Z   query: "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'",
+-2026-05-14T06:46:39.621205747Z   params: [],
+e2026-05-14T06:46:39.621208441Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:39.621211382Z   detail: undefined
+!2026-05-14T06:46:39.621214202Z }
+72026-05-14T06:46:39.623020413Z Database Query Error: {
+i2026-05-14T06:46:39.623036615Z   query: 'SELECT sum(n_live_tup) as total_rows FROM pg_stat_user_tables',
+-2026-05-14T06:46:39.623040040Z   params: [],
+e2026-05-14T06:46:39.623042712Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:39.623068160Z   detail: undefined
+!2026-05-14T06:46:39.623070463Z }
+72026-05-14T06:46:39.623634958Z Database Query Error: {
+�2026-05-14T06:46:39.623650236Z   query: 'SELECT pg_database_size(current_database()) as size_bytes, pg_size_pretty(pg_database_size(current_database())) as size_pretty',
+-2026-05-14T06:46:39.623652713Z   params: [],
+e2026-05-14T06:46:39.623655217Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:39.623658622Z   detail: undefined
+!2026-05-14T06:46:39.623661636Z }
+72026-05-14T06:46:39.623920558Z Database Query Error: {
+Q2026-05-14T06:46:39.623925636Z   query: 'SELECT count(*) FROM pg_stat_activity',
+-2026-05-14T06:46:39.623929049Z   params: [],
+e2026-05-14T06:46:39.623931454Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:39.623934473Z   detail: undefined
+!2026-05-14T06:46:39.623937096Z }
+Y2026-05-14T06:46:39.627413801Z error: password authentication failed for user "postgres"
+W2026-05-14T06:46:39.627435063Z     at /usr/src/app/node_modules/pg-pool/index.js:45:11
+q2026-05-14T06:46:39.627437501Z     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+a2026-05-14T06:46:39.627439646Z     at async ensureTable (/usr/src/app/dist/lib/settings.js:24:5)
+`2026-05-14T06:46:39.627441674Z     at async getSetting (/usr/src/app/dist/lib/settings.js:45:5)
+X2026-05-14T06:46:39.627443746Z     at async /usr/src/app/dist/routes/terminal.js:200:20
+72026-05-14T06:46:54.617275875Z Database Query Error: {
+/2026-05-14T06:46:54.617311608Z   query: '\n' +
+�2026-05-14T06:46:54.617315475Z     '            SELECT pg_size_pretty(pg_database_size(current_database())) as size_pretty\n' +
+/2026-05-14T06:46:54.617318887Z     '        ',
+-2026-05-14T06:46:54.617321774Z   params: [],
+e2026-05-14T06:46:54.617324601Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:54.617328046Z   detail: undefined
+!2026-05-14T06:46:54.617331127Z }
+72026-05-14T06:46:54.618235624Z Database Query Error: {
+/2026-05-14T06:46:54.618246982Z   query: '\n' +
+H2026-05-14T06:46:54.618250398Z     '            SELECT table_name \n' +
+U2026-05-14T06:46:54.618252483Z     '            FROM information_schema.tables \n' +
+T2026-05-14T06:46:54.618254468Z     "            WHERE table_schema = 'public' \n" +
+I2026-05-14T06:46:54.618256629Z     '            ORDER BY table_name\n' +
+/2026-05-14T06:46:54.618258561Z     '        ',
+-2026-05-14T06:46:54.618260377Z   params: [],
+e2026-05-14T06:46:54.618262294Z   errorMessage: 'password authentication failed for user "postgres"',
+32026-05-14T06:46:54.618264495Z   detail: undefined
+!2026-05-14T06:46:54.618294777Z }

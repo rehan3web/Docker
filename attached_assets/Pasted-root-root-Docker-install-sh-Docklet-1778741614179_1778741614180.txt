@@ -1,0 +1,174 @@
+root@root:~/Docker# ./install.sh
+
+  ╔══════════════════════════════════════════╗
+  ║         Docklet — Production Installer   ║
+  ║         https://github.com/rehan3web     ║
+  ╚══════════════════════════════════════════╝
+
+  What would you like to do?
+
+  1) Install Docklet
+  2) Repair  (pull latest code + rebuild)
+  3) Restart app
+  4) Toggle 2FA on/off
+  5) Uninstall Docklet
+  6) Exit
+
+  Enter choice [1-6]: 1
+
+Installing Docklet…
+
+Checking prerequisites…
+[✔] Docker 29.4.3
+[✔] Docker Compose 5.1.3
+[✔] Git 2.43.0
+
+Checking required ports…
+[✔] Port 80 is free
+[✔] Port 443 is free
+[✔] Port 3000 is free
+[•] Updating repository…
+Already up to date.
+
+Configuration
+Press Enter to accept the default shown in [brackets].
+
+  Postgres database name [docklet]: postgres
+  Postgres username [docklet]: postgres
+  Postgres password: 
+  Confirm password: 
+
+  Admin username [admin]: admin
+  Admin password (min 8 chars): 
+  Confirm password: 
+
+  SSL / Let's Encrypt email: rehanweb3.dev@gmail.com
+
+  Enable Two-Factor Authentication (2FA)?
+  [Y] Yes — require TOTP on login
+  [N] No  — password only (can enable later in Settings)
+  Choice [N]: N
+[•] 2FA disabled (toggle any time in Settings → 2FA)
+[✔] .env written
+[•] Building and starting containers (this may take a few minutes)…
+[+] up 46/46
+ ✔ Image redis:7-alpine           Pulled                                                                        2.2s
+ ✔ Image traefik:v3.3             Pulled                                                                        4.1s
+ ✔ Image postgres:15              Pulled                                                                        6.6s
+ ✔ Image alpine:3.19              Pulled                                                                        1.3s
+ ✔ Image edoburu/pgbouncer:latest Pulled                                                                        1.5s
+[+] Building 36.5s (28/28) FINISHED                                                                                 
+ => [internal] load local bake definitions                                                                     0.0s
+ => => reading from stdin 963B                                                                                 0.0s
+ => [docklet-server internal] load build definition from Dockerfile                                            0.0s
+ => => transferring dockerfile: 280B                                                                           0.0s
+ => [docklet-client internal] load build definition from Dockerfile                                            0.0s
+ => => transferring dockerfile: 454B                                                                           0.0s
+ => [docklet-client internal] load metadata for docker.io/library/caddy:2-alpine                               0.4s
+ => [docklet-client internal] load metadata for docker.io/library/node:20-alpine                               0.4s
+ => [docklet-server internal] load .dockerignore                                                               0.0s
+ => => transferring context: 87B                                                                               0.0s
+ => [docklet-client internal] load .dockerignore                                                               0.0s
+ => => transferring context: 79B                                                                               0.0s
+ => [docklet-client 1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a  2.2s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363  0.0s
+ => => sha256:fff4e2c1b189bf87d63ad8bd07f7f4eb288d6f2b6a07a8bb44c60e8c075d2096 445B / 445B                     0.1s
+ => => sha256:b2cbbfe903b0821005780971ddc5892edcc4ce74c5a48d82e1d2b382edac3122 1.26MB / 1.26MB                 0.2s
+ => => sha256:4feea04c154301db6f4a496efa397b3db96603b1c009c797cfdde77bea8b3287 43.23MB / 43.23MB               0.7s
+ => => sha256:6a0ac1617861a677b045b7ff88545213ec31c0ff08763195a70a4a5adda577bb 3.86MB / 3.86MB                 0.2s
+ => => extracting sha256:6a0ac1617861a677b045b7ff88545213ec31c0ff08763195a70a4a5adda577bb                      0.3s
+ => => extracting sha256:4feea04c154301db6f4a496efa397b3db96603b1c009c797cfdde77bea8b3287                      1.4s
+ => => extracting sha256:b2cbbfe903b0821005780971ddc5892edcc4ce74c5a48d82e1d2b382edac3122                      0.0s
+ => => extracting sha256:fff4e2c1b189bf87d63ad8bd07f7f4eb288d6f2b6a07a8bb44c60e8c075d2096                      0.0s
+ => [docklet-client internal] load build context                                                               0.1s
+ => => transferring context: 2.52MB                                                                            0.1s
+ => [docklet-client stage-1 1/3] FROM docker.io/library/caddy:2-alpine@sha256:86deaf5e3d3408a6ccec08fbb799897  1.3s
+ => => resolve docker.io/library/caddy:2-alpine@sha256:86deaf5e3d3408a6ccec08fbb79989783dd26e206ae10bcf78a801  0.0s
+ => => sha256:057c497bda068e80884e6836fbf8971a954593242af7694d080e6b81758b67f4 7.50kB / 7.50kB                 0.1s
+ => => sha256:3b55c68e4a0feeeaec6f86ced6bd8790e19ed68399cff61bab00adc15895ec13 17.23MB / 17.23MB               0.3s
+ => => sha256:5920de1d55d9880b00fbeaf8fa3757e89f7ea6170ff12633cbe766c2152a858d 2.89MB / 2.89MB                 0.2s
+ => => extracting sha256:5920de1d55d9880b00fbeaf8fa3757e89f7ea6170ff12633cbe766c2152a858d                      0.2s
+ => => extracting sha256:057c497bda068e80884e6836fbf8971a954593242af7694d080e6b81758b67f4                      0.1s
+ => => extracting sha256:3b55c68e4a0feeeaec6f86ced6bd8790e19ed68399cff61bab00adc15895ec13                      0.4s
+ => => extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1                      0.0s
+ => [docklet-server internal] load build context                                                               0.1s
+ => => transferring context: 639.25kB                                                                          0.0s
+ => [docklet-client build 2/6] WORKDIR /app                                                                    0.7s
+ => [docklet-server 2/7] RUN apk add --no-cache postgresql-client docker-cli docker-compose bash git util-lin  3.1s
+ => [docklet-client build 3/6] COPY package*.json ./                                                           0.0s
+ => [docklet-client build 4/6] RUN npm install                                                                14.7s
+ => [docklet-server 3/7] WORKDIR /usr/src/app                                                                  0.0s
+ => [docklet-server 4/7] COPY package*.json ./                                                                 0.0s
+ => [docklet-server 5/7] RUN npm install                                                                       8.3s
+ => [docklet-server 6/7] COPY . .                                                                              0.2s
+ => [docklet-server 7/7] RUN npm run build                                                                     8.3s
+ => [docklet-client build 5/6] COPY . .                                                                        0.3s
+ => [docklet-client build 6/6] RUN npm run build                                                              16.1s
+ => [docklet-server] exporting to image                                                                       13.7s
+ => => exporting layers                                                                                        9.2s
+ => => exporting manifest sha256:869f46acd705b8ae1594bde1f74ad7022132a265595c36b8314196db7a6d7093              0.0s
+ => => exporting config sha256:7fbbc89dfdfb5aa5f053c44c138712b657c5acbad9e126df679012c9405fc704                0.0s
+ => => exporting attestation manifest sha256:06e4f72fa58bcfa393b593ad2bfa1bf9be633dd778ee14e189ab38887cb348bc  0.0s
+ => => exporting manifest list sha256:492ba88a5cf9f5abd88c1d5c7d6ea15967df00561da4b22555eaefad63273e5e         0.0s
+ => => naming to docker.io/library/docklet-docklet-server:latest                                               0.0s
+ => => unpacking to docker.io/library/docklet-docklet-server:latest                                            4.4s
+ => [docklet-client stage-1 2/3] COPY --from=build /app/dist /srv                                              0.1s
+ => [docklet-client stage-1 3/3] COPY Caddyfile /etc/caddy/Caddyfile                                           0.0s
+ => [docklet-client] exporting to image                                                                        0.4s
+ => => exporting layers                                                                                        0.3s
+ => => exporting manifest sha256:83d4a5e6534edbdb42e939d5db31ca5229989ed258af7713f9f91ec613244044              0.0s
+ => => exporting config sha256:f7792e93acc6db60011a893c251e5905aac6e06e90fdc83395528be4197b667b                0.0s
+[+] up 55/55ting attestation manifest sha256:37907e15145a80972aca0a54683c9dc7579b4023be00f304219bef68e33831db  0.0s
+ ✔ Image redis:7-alpine           Pulled                                                                        2.2s
+ ✔ Image traefik:v3.3             Pulled                                                                        4.1s
+ ✔ Image postgres:15              Pulled                                                                        6.6s
+ ✔ Image alpine:3.19              Pulled                                                                        1.3s
+ ✔ Image edoburu/pgbouncer:latest Pulled                                                                        1.5s
+ ✔ Image docklet-docklet-server   Built                                                                        36.6s
+ ✔ Image docklet-docklet-client   Built                                                                        36.6s
+ ✔ Container docklet-redis        Healthy                                                                      11.8s
+ ✔ Container docklet-db           Healthy                                                                      11.1s
+ ✔ Container docklet-traefik-init Exited                                                                       12.6s
+ ✔ Container docklet-pooler       Started                                                                      11.2s
+ ✔ Container docklet-server       Started                                                                      11.9s
+ ✔ Container docklet-traefik      Started                                                                      12.7s
+ ✔ Container docklet-client       Started                                                                      12.1s
+[✔] All containers started
+
+╔══════════════════════════════════════════════╗
+║      Docklet Installed Successfully! ✔       ║
+╚══════════════════════════════════════════════╝
+
+  Dashboard (direct):   http://159.203.186.214:3000
+  Dashboard (via 80):   http://159.203.186.214
+
+  Admin username:  admin
+  Admin password:  (the password you entered)
+  2FA:             false
+  SSL email:       rehanweb3.dev@gmail.com
+
+  Tip: Point a domain A-record to 159.203.186.214, then use
+       Docklet's Reverse Proxy page to enable HTTPS.
+
+root@root:~/Docker# cat .env
+# ── Database ──────────────────────────────────────────────
+DB_NAME=postgres
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+
+# ── Admin account ─────────────────────────────────────────
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=12345678
+
+# ── Security ──────────────────────────────────────────────
+JWT_SECRET=cf94002997e0dc14ea9212af44937f9b1d7d88bfc719afe1321daaab56de83af
+
+# ── SSL / Let's Encrypt ───────────────────────────────────
+# Your email address for cert expiry notices (required).
+ACME_EMAIL=rehanweb3.dev@gmail.com
+
+# ── Two-Factor Authentication ─────────────────────────────
+# true  = TOTP required at login
+# false = password only (can be changed in Settings → 2FA)
+ENABLE_2FA=false
+root@root:~/Docker# 

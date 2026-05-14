@@ -218,6 +218,22 @@ start_containers() {
   success "All containers started"
 }
 
+# ── Fresh-install: tear down any leftover containers + volumes ─
+purge_old_install() {
+  # Silently remove any existing Docklet containers and their named volumes
+  # so that PostgreSQL always initialises with the credentials from the new
+  # .env (Postgres ignores POSTGRES_PASSWORD if the data directory already
+  # exists — stale volumes are the most common cause of auth failures).
+  if docker compose -f "$COMPOSE_FILE" ps -q 2>/dev/null | grep -q .; then
+    info "Removing existing containers and volumes for a clean install…"
+    docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
+  else
+    # Even if no containers are running, remove orphan named volumes that
+    # belong to this compose project so Postgres gets a blank data dir.
+    docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
+  fi
+}
+
 # ── Show success summary ──────────────────────────────────────
 show_summary() {
   local ip
@@ -251,6 +267,7 @@ do_install() {
   clone_or_update
   configure_env
   write_env
+  purge_old_install
   start_containers
   show_summary
 }
@@ -408,7 +425,7 @@ main_menu() {
 #   sudo bash install.sh uninstall
 
 case "${1:-menu}" in
-  install)   require_root; install_prerequisites; check_ports; clone_or_update; configure_env; write_env; start_containers; show_summary ;;
+  install)   require_root; install_prerequisites; check_ports; clone_or_update; configure_env; write_env; purge_old_install; start_containers; show_summary ;;
   repair)    require_root; do_repair    ;;
   restart)   require_root; do_restart   ;;
   2fa)       require_root; toggle_2fa   ;;

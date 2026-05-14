@@ -13,9 +13,11 @@ services:
     image: postgres:15
     restart: unless-stopped
     environment:
-      POSTGRES_USER:     ${DB_USERNAME}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:              ${DB_USERNAME}
+      POSTGRES_PASSWORD:          ${DB_PASSWORD}
+      POSTGRES_DB:                ${DB_NAME}
+      POSTGRES_HOST_AUTH_METHOD:  md5
+      POSTGRES_INITDB_ARGS:       "--auth-host=md5 --auth-local=md5"
     ports:
       - "127.0.0.1:15432:5432"   # local-only; Traefik TCP proxy serves public :5432
     volumes:
@@ -44,7 +46,7 @@ services:
       POOL_MODE:   transaction
       MAX_CLIENT_CONN:   1000
       DEFAULT_POOL_SIZE: 10
-      AUTH_TYPE:   scram-sha-256
+      AUTH_TYPE:   md5
       IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
 
   # ── Traefik TCP proxy — started by "Expose Public" button ──────────────────
