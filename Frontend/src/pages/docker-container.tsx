@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, Play, Square, RotateCw, Trash2, Loader2, Network, HardDrive, Terminal, KeyRound, Clock, Globe, RefreshCw, FileText, Rocket, Cpu, MemoryStick, Container, Sun, Moon, AlertTriangle, CheckCircle, XCircle, Copy, Code2, ChevronDown, ChevronUp, ShieldCheck, ExternalLink, Plus, EyeOff, History, ChevronRight, ToggleLeft, ToggleRight, Save, RotateCcw, Database, Zap, ChevronLeft, Sparkles, Bot, User, Send, Info, TriangleAlert, CircleCheck, Lightbulb } from "lucide-react";
+import { ArrowLeft, Play, Square, RotateCw, Trash2, Loader2, Network, HardDrive, Terminal, KeyRound, Clock, Globe, RefreshCw, FileText, Rocket, Cpu, MemoryStick, Container, Sun, Moon, AlertTriangle, CheckCircle, XCircle, Copy, Code2, ChevronDown, ChevronUp, ShieldCheck, ExternalLink, Plus, EyeOff, History, ChevronRight, ToggleLeft, ToggleRight, Save, RotateCcw, Database, Zap, ChevronLeft, Sparkles, Bot, User, Send, Info, TriangleAlert, CircleCheck, Lightbulb, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -709,6 +709,34 @@ function TerminalTab({ container }: { container: DockerContainer }) {
   );
 }
 
+// ── .env file parser ─────────────────────────────────────────────────────────
+function parseEnvFile(content: string): Array<{ key: string; value: string }> {
+  const result: Array<{ key: string; value: string }> = [];
+  for (const raw of content.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eqIdx = line.indexOf('=');
+    if (eqIdx < 1) continue;
+    const key = line.slice(0, eqIdx).trim();
+    let value = line.slice(eqIdx + 1);
+    // Strip inline comments only when value is unquoted
+    if (!value.trimStart().startsWith('"') && !value.trimStart().startsWith("'")) {
+      const commentIdx = value.indexOf(' #');
+      if (commentIdx !== -1) value = value.slice(0, commentIdx);
+    }
+    value = value.trim();
+    // Remove surrounding quotes (single or double)
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      result.push({ key: key.toUpperCase(), value });
+    }
+  }
+  return result;
+}
+
 // ── Environment Tab ───────────────────────────────────────────────────────────
 function EnvironmentTab({ containerName }: { containerName: string }) {
   const qc = useQueryClient();
@@ -722,8 +750,32 @@ function EnvironmentTab({ containerName }: { containerName: string }) {
   const [versions, setVersions] = useState<EnvVersion[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [rollingBack, setRollingBack] = useState<number | null>(null);
+  const [envDragOver, setEnvDragOver] = useState(false);
+  const [importingEnv, setImportingEnv] = useState(false);
+  const envFileRef = useRef<HTMLInputElement>(null);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["container-env", containerName] });
+
+  async function handleEnvFileImport(file: File) {
+    if (!file) return;
+    setImportingEnv(true);
+    setEnvDragOver(false);
+    try {
+      const content = await file.text();
+      const pairs = parseEnvFile(content);
+      if (pairs.length === 0) { toast.error("No valid KEY=VALUE pairs found in the file"); return; }
+      for (const { key, value } of pairs) {
+        await containerEnvSet(containerName, key, value);
+      }
+      refresh();
+      toast.success(`Imported ${pairs.length} variable${pairs.length !== 1 ? "s" : ""} from ${file.name}`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to import .env file");
+    } finally {
+      setImportingEnv(false);
+      if (envFileRef.current) envFileRef.current.value = "";
+    }
+  }
 
   async function handleAdd() {
     if (!newKey.trim()) return;
@@ -809,6 +861,42 @@ function EnvironmentTab({ containerName }: { containerName: string }) {
         ) : (
           <>
             <p className="text-xs text-muted-foreground">Values are encrypted at rest. Click "Apply & Restart" to apply.</p>
+
+            {/* .env file drop zone */}
+            <input
+              ref={envFileRef}
+              type="file"
+              accept=".env,.txt,text/plain"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleEnvFileImport(f);
+              }}
+            />
+            <div
+              onDragOver={(e) => { e.preventDefault(); setEnvDragOver(true); }}
+              onDragLeave={() => setEnvDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files[0];
+                if (f) handleEnvFileImport(f);
+                else setEnvDragOver(false);
+              }}
+              onClick={() => !importingEnv && envFileRef.current?.click()}
+              className={`flex items-center gap-2.5 rounded-lg border border-dashed px-3 py-2.5 cursor-pointer transition-colors ${
+                envDragOver
+                  ? "border-primary bg-primary/8 text-primary"
+                  : "border-border hover:border-primary/40 hover:bg-muted/40 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {importingEnv
+                ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                : <Upload className="w-3.5 h-3.5 shrink-0" />}
+              <span className="text-xs">
+                {importingEnv ? "Importing variables…" : "Drop a .env file or click to import"}
+              </span>
+            </div>
+
             <div className="flex gap-2 items-center">
               <Input placeholder="KEY" value={newKey} onChange={e => setNewKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))} className="h-8 text-xs font-mono w-40 shrink-0" />
               <span className="text-muted-foreground text-xs shrink-0">=</span>
