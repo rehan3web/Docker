@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Sun, Moon, GitBranch, RefreshCw, Loader2, CheckCircle2, XCircle, Clock, Container, Layers, ListOrdered } from "lucide-react";
+import {
+  Sun, Moon, GitBranch, Loader2, CheckCircle2, XCircle, Clock,
+  Container, Layers, ListOrdered, Upload, FileArchive, X,
+} from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,22 +12,26 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
-import { useGetDeployments, startGithubDeploy, getDeploymentLogs, type DeploySummary } from "@/api/client";
+import {
+  useGetDeployments, startGithubDeploy, startZipDeploy,
+  getDeploymentLogs, type DeploySummary,
+} from "@/api/client";
 import { getSocket } from "@/api/socket";
 import { useQueryClient } from "@tanstack/react-query";
 
 type LogLine = { stream: "stdout" | "stderr" | "system"; text: string; timestamp: number };
+type Tab = "github" | "upload";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function DeployStatusBadge({ status }: { status: string }) {
   const map: Record<string, { color: string; icon: React.ReactNode }> = {
-    queued:   { color: "text-violet-500 bg-violet-500/10 border-violet-500/30",  icon: <ListOrdered className="w-2.5 h-2.5" /> },
-    pending:  { color: "text-muted-foreground bg-muted/50 border-border",         icon: <Clock className="w-2.5 h-2.5" /> },
-    cloning:  { color: "text-blue-500 bg-blue-500/10 border-blue-500/30",         icon: <Loader2 className="w-2.5 h-2.5 animate-spin" /> },
-    building: { color: "text-amber-500 bg-amber-500/10 border-amber-500/30",      icon: <Loader2 className="w-2.5 h-2.5 animate-spin" /> },
-    running:  { color: "text-amber-500 bg-amber-500/10 border-amber-500/30",      icon: <Loader2 className="w-2.5 h-2.5 animate-spin" /> },
-    success:  { color: "text-primary bg-primary/10 border-primary/20",            icon: <CheckCircle2 className="w-2.5 h-2.5" /> },
+    queued:   { color: "text-violet-500 bg-violet-500/10 border-violet-500/30",   icon: <ListOrdered className="w-2.5 h-2.5" /> },
+    pending:  { color: "text-muted-foreground bg-muted/50 border-border",          icon: <Clock className="w-2.5 h-2.5" /> },
+    cloning:  { color: "text-blue-500 bg-blue-500/10 border-blue-500/30",          icon: <Loader2 className="w-2.5 h-2.5 animate-spin" /> },
+    building: { color: "text-amber-500 bg-amber-500/10 border-amber-500/30",       icon: <Loader2 className="w-2.5 h-2.5 animate-spin" /> },
+    running:  { color: "text-amber-500 bg-amber-500/10 border-amber-500/30",       icon: <Loader2 className="w-2.5 h-2.5 animate-spin" /> },
+    success:  { color: "text-primary bg-primary/10 border-primary/20",             icon: <CheckCircle2 className="w-2.5 h-2.5" /> },
     failed:   { color: "text-destructive bg-destructive/10 border-destructive/30", icon: <XCircle className="w-2.5 h-2.5" /> },
   };
   const cfg = map[status] || map.pending;
@@ -56,25 +63,37 @@ function BuildMethodBadge({ method }: { method?: "docker" | "railpack" }) {
 export default function DeployPage() {
   const { theme, toggle } = useTheme();
   const qc = useQueryClient();
-  const [repo, setRepo] = useState("");
+
+  const [tab, setTab]               = useState<Tab>("github");
+
+  // GitHub tab state
+  const [repo, setRepo]             = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
+
+  // File upload tab state
+  const [zipFile, setZipFile]             = useState<File | null>(null);
+  const [zipSubmitting, setZipSubmitting] = useState(false);
+  const [dragOver, setDragOver]           = useState(false);
+  const fileInputRef                      = useRef<HTMLInputElement>(null);
+
+  // Shared log / history state
+  const [activeId, setActiveId]         = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState<string | null>(null);
   const [activeDeploy, setActiveDeploy] = useState<DeploySummary | null>(null);
-  const [logs, setLogs] = useState<LogLine[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
+  const [logs, setLogs]                 = useState<LogLine[]>([]);
+  const [logsLoading, setLogsLoading]   = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+
   const { data: deploys } = useGetDeployments();
 
-  // ── Socket.IO live streaming ───────────────────────────────────────────────
+  // ── Socket.IO live streaming ─────────────────────────────────────────────────
   useEffect(() => {
     const socket = getSocket();
     const onLog = (e: { id: string; stream: "stdout" | "stderr" | "system"; chunk: string }) => {
-      if (activeId && e.id === activeId) {
+      if (activeId && e.id === activeId)
         setLogs(prev => [...prev, { stream: e.stream, text: e.chunk, timestamp: Date.now() }]);
-      }
     };
-    const onStatus = (e: { id: string; status: string; error?: string; buildMethod?: string; queuePosition?: number }) => {
+    const onStatus = (e: { id: string; status: string; error?: string; queuePosition?: number }) => {
       if (activeId && e.id === activeId) {
         setActiveStatus(e.status);
         if (e.error) toast.error(e.error);
@@ -87,12 +106,12 @@ export default function DeployPage() {
     return () => { socket.off("deploy-log", onLog); socket.off("deploy-status", onStatus); };
   }, [activeId, qc]);
 
-  // ── Auto-scroll ────────────────────────────────────────────────────────────
+  // ── Auto-scroll ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs.length]);
 
-  // ── Load cached logs (Redis-backed, survives page refresh) ────────────────
+  // ── Load cached logs ─────────────────────────────────────────────────────────
   async function loadDeploymentHistory(d: DeploySummary) {
     setActiveId(d.id);
     setActiveDeploy(d);
@@ -109,8 +128,8 @@ export default function DeployPage() {
     }
   }
 
-  // ── Submit deploy ──────────────────────────────────────────────────────────
-  async function handleDeploy(e: React.FormEvent) {
+  // ── GitHub deploy ────────────────────────────────────────────────────────────
+  async function handleGithubDeploy(e: React.FormEvent) {
     e.preventDefault();
     if (!repo.trim()) return;
     setSubmitting(true);
@@ -130,11 +149,57 @@ export default function DeployPage() {
     }
   }
 
-  // ── Live status from list ──────────────────────────────────────────────────
+  // ── Zip deploy ───────────────────────────────────────────────────────────────
+  async function handleZipDeploy() {
+    if (!zipFile) return;
+    setZipSubmitting(true);
+    setLogs([]);
+    setActiveStatus("queued");
+    setActiveDeploy(null);
+    try {
+      const r = await startZipDeploy(zipFile);
+      setActiveId(r.id);
+      toast.info(`Queued: ${r.name}`);
+      setZipFile(null);
+      qc.invalidateQueries({ queryKey: ["deployments"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to upload");
+      setActiveStatus(null);
+    } finally {
+      setZipSubmitting(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.toLowerCase().endsWith(".zip")) setZipFile(file);
+    else toast.error("Please drop a .zip file");
+  }
+
+  // ── Derived state ────────────────────────────────────────────────────────────
   const activeFromList = deploys?.deployments?.find(d => d.id === activeId);
   const displayDeploy  = activeFromList ?? activeDeploy;
   const displayStatus  = activeFromList?.status ?? activeStatus;
   const queuePos       = activeFromList?.queuePosition;
+
+  // ── Tab button helper ────────────────────────────────────────────────────────
+  function TabBtn({ id, label, icon }: { id: Tab; label: string; icon: React.ReactNode }) {
+    const active = tab === id;
+    return (
+      <button
+        onClick={() => setTab(id)}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+          active
+            ? "bg-primary/10 text-primary border border-primary/20"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent"
+        }`}
+      >
+        {icon}{label}
+      </button>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex">
@@ -150,7 +215,7 @@ export default function DeployPage() {
                 <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">
                   <GitBranch className="w-4 h-4 text-primary" />
                 </div>
-                <span className="font-medium text-sm tracking-tight">GitHub Auto Deploy</span>
+                <span className="font-medium text-sm tracking-tight">Auto Deploy</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -164,32 +229,122 @@ export default function DeployPage() {
         {/* ── Content ── */}
         <main className="flex-1 px-4 py-8 space-y-6 pb-24 max-w-6xl w-full mx-auto">
           <div className="flex flex-col gap-1 mb-2">
-            <h1 className="text-4xl sm:text-5xl font-normal tracking-tight leading-none">GitHub Auto Deploy</h1>
+            <h1 className="text-4xl sm:text-5xl font-normal tracking-tight leading-none">Auto Deploy</h1>
             <p className="text-muted-foreground text-sm max-w-xl leading-relaxed mt-2">
-              Paste a Git repo URL — Docklet clones it, detects the Dockerfile (or uses RailPack auto-build), and starts a container. Builds are queued to prevent overload.
+              Deploy from a Git repo or a zip file. Docklet detects the Dockerfile (Docker build) or falls back to RailPack auto-detect. Builds are queued to prevent overload.
             </p>
           </div>
 
-          {/* Deploy form */}
+          {/* ── Deploy card with tabs ── */}
           <Card className="bg-background border-border shadow-none rounded-xl">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-sm font-medium tracking-tight">Deploy from Git</CardTitle>
-              <CardDescription className="text-xs text-muted-foreground">
-                With Dockerfile → Docker build. Without Dockerfile → RailPack auto-detect (Node, Python, Go, Rust, PHP, Bun, static…).
-              </CardDescription>
+            <CardHeader className="p-4 pb-3">
+              {/* Tab row */}
+              <div className="flex items-center gap-1.5">
+                <TabBtn id="github" label="GitHub" icon={<GitBranch className="w-3 h-3" />} />
+                <TabBtn id="upload" label="File Upload" icon={<Upload className="w-3 h-3" />} />
+              </div>
             </CardHeader>
-            <CardContent className="p-4 pt-2">
-              <form onSubmit={handleDeploy} className="flex flex-col sm:flex-row gap-2chnage forn ">
-                <Input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="https://github.com/user/repo.git" className="font-mono text-xs" />
-                <Button type="submit" className="h-9 sm:w-auto w-full border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" disabled={submitting || !repo.trim()}>
-                  {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <GitBranch className="w-3.5 h-3.5 mr-2" />}
-                  Deploy
-                </Button>
-              </form>
+
+            <CardContent className="p-4 pt-0">
+
+              {/* ── GitHub tab ── */}
+              {tab === "github" && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    With Dockerfile → Docker build. Without Dockerfile → RailPack auto-detect (Node, Python, Go, Rust, PHP, Bun, static…).
+                  </p>
+                  <form onSubmit={handleGithubDeploy} className="flex flex-col sm:flex-row gap-2">
+                    <Input
+                      value={repo}
+                      onChange={(e) => setRepo(e.target.value)}
+                      placeholder="https://github.com/user/repo.git"
+                      className="font-mono text-xs"
+                    />
+                    <Button
+                      type="submit"
+                      className="h-9 sm:w-auto w-full border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none"
+                      disabled={submitting || !repo.trim()}
+                    >
+                      {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <GitBranch className="w-3.5 h-3.5 mr-2" />}
+                      Deploy
+                    </Button>
+                  </form>
+                </div>
+              )}
+
+              {/* ── File Upload tab ── */}
+              {tab === "upload" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Upload a .zip of your project. Docklet unzips it, checks for a Dockerfile → Docker build, or uses RailPack auto-detect.
+                  </p>
+
+                  {/* Drop zone */}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleDrop}
+                    onClick={() => !zipFile && fileInputRef.current?.click()}
+                    className={`relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed transition-colors cursor-pointer px-6 py-8 ${
+                      dragOver
+                        ? "border-primary bg-primary/5"
+                        : zipFile
+                        ? "border-primary/40 bg-primary/5 cursor-default"
+                        : "border-border hover:border-primary/40 hover:bg-muted/40"
+                    }`}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".zip,application/zip,application/x-zip-compressed"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setZipFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                    {zipFile ? (
+                      <>
+                        <FileArchive className="w-8 h-8 text-primary/70" />
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-foreground">{zipFile.name}</p>
+                          <p className="text-xs text-muted-foreground">{(zipFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setZipFile(null); }}
+                          className="absolute top-2 right-2 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-8 h-8 text-muted-foreground/50" />
+                        <div className="text-center">
+                          <p className="text-sm text-muted-foreground">Drop a <span className="font-mono">.zip</span> here or click to browse</p>
+                          <p className="text-xs text-muted-foreground/60 mt-0.5">Max 512 MB</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <Button
+                    onClick={handleZipDeploy}
+                    disabled={!zipFile || zipSubmitting}
+                    className="w-full h-9 border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none"
+                  >
+                    {zipSubmitting
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Uploading…</>
+                      : <><Upload className="w-3.5 h-3.5 mr-2" />Deploy</>
+                    }
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
 
-          {/* Live Logs */}
+          {/* ── Live Logs ── */}
           <Card className="bg-background border-border shadow-none rounded-xl overflow-hidden">
             <CardHeader className="p-4 pb-3 border-b border-border/50 flex-row items-center justify-between flex-wrap gap-2">
               <div>
@@ -229,7 +384,7 @@ export default function DeployPage() {
             </CardContent>
           </Card>
 
-          {/* Deploy History */}
+          {/* ── Deploy History ── */}
           <Card className="bg-background border-border shadow-none rounded-xl">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium tracking-tight">Deploy History</CardTitle>

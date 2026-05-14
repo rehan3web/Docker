@@ -671,6 +671,23 @@ export async function startGithubDeploy(repo: string): Promise<{ id: string; nam
   });
 }
 
+export async function startZipDeploy(file: File): Promise<{ id: string; name: string }> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${BASE}/deploy/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    let msg = `Upload failed (${res.status})`;
+    try { const j = await res.json(); msg = j.message || msg; } catch {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export async function getDeployment(id: string): Promise<any> {
   return apiFetch(`/deploy/${id}`);
 }

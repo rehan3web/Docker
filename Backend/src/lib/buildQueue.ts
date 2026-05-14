@@ -60,6 +60,7 @@ export interface DeployRecord {
     containerPort?: number;
     containerName?: string;
     proxyNetwork?: string;    // set for railpack containers routed via Traefik
+    sourceDir?: string;       // set for zip-upload deploys — skips git clone step
     logs: { stream: 'stdout' | 'stderr' | 'system'; chunk: string; timestamp: number }[];
 }
 
@@ -362,19 +363,25 @@ async function runBuild(id: string) {
     if (!record) return;
 
     const projectName   = record.name;
-    const cloneDir      = path.join(DEPLOY_ROOT, `${projectName}-${id}`);
+    const cloneDir      = record.sourceDir ?? path.join(DEPLOY_ROOT, `${projectName}-${id}`);
     const imageTag      = `docklet-${projectName}-${id}`.toLowerCase();
     const containerName = `nb-${projectName}-${id}`.toLowerCase();
 
     try {
-        // 1. Clone
-        emitStatus(id, 'cloning');
-        emitLog(id, 'system', `Cloning ${record.repo} into ${cloneDir}\n`);
-        const cloneCode = await runStreamed(id, 'git', ['clone', '--depth', '1', record.repo, cloneDir], DEPLOY_ROOT);
-        if (cloneCode !== 0) {
-            record.error = `git clone failed (exit ${cloneCode})`;
-            record.finishedAt = Date.now();
-            return emitStatus(id, 'failed', { error: record.error });
+        if (record.sourceDir) {
+            // Zip-upload path — source already extracted, skip clone
+            emitStatus(id, 'cloning');
+            emitLog(id, 'system', `Using uploaded source directory: ${cloneDir}\n`);
+        } else {
+            // 1. Clone from Git
+            emitStatus(id, 'cloning');
+            emitLog(id, 'system', `Cloning ${record.repo} into ${cloneDir}\n`);
+            const cloneCode = await runStreamed(id, 'git', ['clone', '--depth', '1', record.repo, cloneDir], DEPLOY_ROOT);
+            if (cloneCode !== 0) {
+                record.error = `git clone failed (exit ${cloneCode})`;
+                record.finishedAt = Date.now();
+                return emitStatus(id, 'failed', { error: record.error });
+            }
         }
 
         if (!dockerAvailable()) {
